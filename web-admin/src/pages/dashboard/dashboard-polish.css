@@ -1,0 +1,242 @@
+/* ============================================================
+   dashboard-polish.css
+   Load this AFTER Dashboard.css (and after the sidebar-and-
+   scrollbar.css patch from before). It only refines existing
+   classes — no renaming, nothing to rewire in your JSX except
+   the 3 className additions listed at the bottom.
+   ============================================================ */
+
+/* ---------- Base rhythm ---------- */
+.db-page-content {
+  background: linear-gradient(180deg, #f8fafc 0%, #f4f6fa 100%);
+  -webkit-font-smoothing: antialiased;
+}
+
+.db-header-title {
+  letter-spacing: -0.03em;
+}
+
+/* ---------- Header ---------- */
+.db-header {
+  padding-bottom: 4px;
+}
+
+.db-header-updated {
+  background: #fff;
+  border: 1px solid #eef1f5;
+  padding: 3px 9px;
+  border-radius: 20px;
+}
+
+.db-refresh-btn {
+  transition: all 0.15s ease;
+}
+.db-refresh-btn:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+.db-notify-btn {
+  transition: all 0.15s ease;
+}
+.db-notify-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(124, 58, 237, 0.4);
+}
+.db-notify-btn:active,
+.db-refresh-btn:active {
+  transform: translateY(0);
+}
+
+/* ---------- Stat cards ---------- */
+.db-stat-card {
+  border-radius: 18px;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 8px 24px rgba(15, 23, 42, 0.04);
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    border-color 0.18s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.db-stat-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.6),
+    transparent 40%
+  );
+  pointer-events: none;
+}
+
+.db-stat-icon-wrap {
+  border-radius: 14px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+}
+
+.db-stat-value {
+  letter-spacing: -0.02em;
+}
+
+/* ---------- Live transit + halt bar ---------- */
+.db-transit-chip {
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.25);
+}
+
+.db-halt-bar {
+  box-shadow: 0 2px 10px rgba(217, 119, 6, 0.08);
+}
+
+.db-halt-chip {
+  transition: transform 0.15s ease;
+}
+.db-halt-chip:hover {
+  transform: translateY(-1px);
+}
+
+.db-halt-link {
+  transition: opacity 0.15s ease;
+}
+.db-halt-link:hover {
+  opacity: 0.7;
+}
+
+/* ---------- Panels ---------- */
+.db-panel,
+.db-map-card {
+  border-radius: 18px;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 10px 30px rgba(15, 23, 42, 0.05);
+}
+
+.db-panel-title {
+  letter-spacing: -0.01em;
+}
+
+.db-route-tab-btn,
+.db-tab-btn {
+  transition: all 0.15s ease;
+}
+.db-route-tab-btn:hover:not(.db-route-tab-btn--active) {
+  background: #eef2f7;
+  color: #334155;
+}
+
+/* ---------- Route cards ---------- */
+.db-route-card {
+  border: 1px solid #f1f5f9;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    border-color 0.15s ease;
+}
+.db-route-card:hover {
+  transform: translateY(-2px);
+  border-color: #e2e8f0;
+}
+
+/* ---------- Zone attendance ---------- */
+.db-progress-summary {
+  border: 1px solid #eef1f5;
+}
+
+.db-zone-bar-fill {
+  background-image: linear-gradient(90deg, currentColor, currentColor);
+}
+
+/* ---------- Map card ---------- */
+.db-map-header {
+  background: linear-gradient(180deg, #fff, #fbfcfe);
+}
+
+.db-map-filter {
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
+}
+
+/* ---------- Modals ---------- */
+.db-modal {
+  border: 1px solid rgba(255, 255, 255, 0.6);
+}
+
+.db-issue-row,
+.db-alert-row {
+  transition: transform 0.12s ease;
+}
+.db-issue-row:hover,
+.db-alert-row:hover {
+  transform: translateX(2px);
+}
+
+.db-notify-select,
+.db-notify-date-input,
+.db-notify-textarea {
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.db-notify-select:focus,
+.db-notify-date-input:focus,
+.db-notify-textarea:focus {
+  outline: none;
+  border-color: #7c3aed;
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.12);
+}
+
+.db-notify-send-btn {
+  transition: all 0.15s ease;
+}
+.db-notify-send-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 22px rgba(185, 28, 28, 0.45);
+}
+
+/* ============================================================
+   Auto-hide overflow-y scrollbars — same utility as before,
+   applied to every remaining scroll container on this page.
+   Add `custom-scroll` to these three elements in Dashboard.jsx:
+
+     <div className="db-route-list custom-scroll">
+     <div className="db-zone-scroll custom-scroll">
+     <div className="db-modal custom-scroll" style={{ width }}>
+
+   (.nav-menu already has it from the sidebar patch.)
+   ============================================================ */
+.custom-scroll {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.custom-scroll:hover,
+.custom-scroll:focus-within {
+  scrollbar-color: #94a3b8 transparent;
+}
+.custom-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scroll::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 10px;
+  transition: background 0.2s ease;
+}
+.custom-scroll:hover::-webkit-scrollbar-thumb,
+.custom-scroll:focus-within::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+}
+.custom-scroll:hover::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Skip this block if you already pasted it from the sidebar
+   patch — it's the same rule, kept here so this file also
+   works standalone. */

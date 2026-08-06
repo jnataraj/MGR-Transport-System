@@ -1,0 +1,50 @@
+{
+  "expo": {
+    "name": "CTMS Student App",
+    "slug": "mobile-student-parent",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "plugins": [
+      "expo-camera",
+      "react-native-maps"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "config": {
+        "googleMapsApiKey": "AIzaSyBCqrv6RNJ5rJJjmrn0Z3WF0NGKRH9vKLU"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "CAMERA",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "package": "com.natarajj25steam.studentmainappjs",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyBCqrv6RNJ5rJJjmrn0Z3WF0NGKRH9vKLU"
+        }
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "a3c53507-2789-47ea-80df-acd4f1cd4eae"
+      }
+    },
+    "owner": "natarajj25s-team"
+  }
+}

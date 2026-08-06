@@ -1,0 +1,523 @@
+/* ============================================================
+   HoD.css
+   Styles for the HoD Management page (HoDs.jsx)
+   ============================================================ */
+
+:root {
+  --hod-accent: #7c3aed;
+  --hod-accent-light: #f5f3ff;
+  --hod-accent-border: #ddd6fe;
+  --hod-accent-dark: #5b21b6;
+  --hod-border: #d1d5db;
+  --hod-border-strong: #9ca3af;
+  --hod-text-main: #111827;
+  --hod-text-muted: #6b7280;
+  --hod-bg-subtle: #f9fafb;
+  --hod-radius: 8px;
+}
+
+/* ---------- Page header ---------- */
+.hod-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+  gap: 16px;
+}
+
+.hod-page-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+}
+
+.hod-page-subtitle {
+  color: var(--hod-text-muted);
+  margin-top: 4px;
+  font-size: 0.9rem;
+}
+
+.hod-btn-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--hod-accent);
+  box-shadow: 0 4px 14px rgba(124, 58, 237, 0.3);
+  flex-shrink: 0;
+}
+
+/* ============================================================
+   Modal
+   ============================================================ */
+.hod-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 24px;
+}
+
+.hod-modal {
+  background: #fff;
+  border-radius: 14px;
+  width: 480px;
+  max-width: 100%;
+  max-height: 88vh;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.hod-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 1.5rem 1.75rem 1.25rem;
+  border-bottom: 1px solid var(--hod-border);
+  flex-shrink: 0;
+}
+
+.hod-modal-header h2 {
+  margin: 0;
+  font-size: 1.2rem;
+  color: var(--hod-text-main);
+}
+
+/* Scrollable body: auto overflow, thin scrollbar that only appears when needed */
+.hod-modal-body {
+  padding: 1.5rem 1.75rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Custom slim scrollbar (WebKit) */
+.hod-modal-body::-webkit-scrollbar {
+  width: 6px;
+}
+.hod-modal-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+.hod-modal-body::-webkit-scrollbar-thumb {
+  background-color: #c4b5fd;
+  border-radius: 999px;
+}
+.hod-modal-body::-webkit-scrollbar-thumb:hover {
+  background-color: var(--hod-accent);
+}
+/* Firefox */
+.hod-modal-body {
+  scrollbar-width: thin;
+  scrollbar-color: #c4b5fd transparent;
+}
+
+.hod-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 1.25rem 1.75rem;
+  border-top: 1px solid var(--hod-border);
+  flex-shrink: 0;
+  background: var(--hod-bg-subtle);
+}
+
+/* ---------- Form sections ---------- */
+.hod-form-section {
+  margin-bottom: 1.5rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.hod-form-section:last-of-type {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.hod-form-section h3 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  margin: 0 0 1rem 0;
+  color: var(--hod-text-main);
+}
+
+.hod-form-section.credentials {
+  padding: 1.25rem;
+  border-radius: var(--hod-radius);
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  margin-bottom: 0;
+}
+
+.hod-form-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 1rem;
+}
+
+.hod-form-row:last-child {
+  margin-bottom: 0;
+}
+
+.hod-field {
+  flex: 1;
+  margin-bottom: 1rem;
+  min-width: 0; /* prevents flex items from overflowing their container */
+}
+
+.hod-form-row .hod-field {
+  margin-bottom: 0;
+}
+
+.hod-field:last-child {
+  margin-bottom: 0;
+}
+
+.hod-field label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--hod-text-main);
+}
+
+/* ---------- Inputs: always-visible, consistent borders ---------- */
+.hod-field input,
+.hod-field select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1.5px solid var(--hod-border);
+  background: #fff;
+  font-size: 0.95rem;
+  color: var(--hod-text-main);
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.hod-field input::placeholder {
+  color: #9ca3af;
+}
+
+.hod-field input:hover,
+.hod-field select:hover {
+  border-color: var(--hod-border-strong);
+}
+
+.hod-field input:focus,
+.hod-field select:focus {
+  outline: none;
+  border-color: var(--hod-accent);
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.15);
+}
+
+.hod-field input:disabled {
+  background: #f3f4f6;
+  color: #374151;
+  font-weight: 600;
+  cursor: not-allowed;
+}
+
+.hod-field input[type="file"] {
+  border: 1.5px dashed var(--hod-border);
+  background: var(--hod-bg-subtle);
+  cursor: pointer;
+  padding: 9px 12px;
+}
+
+.hod-field input[type="file"]:hover {
+  border-color: var(--hod-accent);
+}
+
+/* ---------- Buttons ---------- */
+.hod-btn-cancel {
+  padding: 10px 18px;
+  border-radius: 6px;
+  border: 1.5px solid var(--hod-border);
+  background: #fff;
+  color: var(--hod-text-main);
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.hod-btn-cancel:hover {
+  background: var(--hod-bg-subtle);
+  border-color: var(--hod-border-strong);
+}
+
+.hod-btn-save {
+  padding: 10px 18px;
+  border-radius: 6px;
+  background: var(--hod-accent);
+}
+
+/* ============================================================
+   Table
+   ============================================================ */
+.hod-table-card {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  border: 1px solid #f0f0f2;
+  overflow: hidden;
+  margin-bottom: 2rem;
+}
+
+.hod-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.hod-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  min-width: 640px;
+}
+
+.hod-table thead tr {
+  background: var(--hod-bg-subtle);
+  border-bottom: 1px solid var(--hod-border);
+}
+
+.hod-table th {
+  padding: 1rem 1.5rem;
+  color: var(--hod-text-muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.hod-table td {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid #f0f0f2;
+  vertical-align: middle;
+}
+
+.hod-table tbody tr {
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.hod-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.hod-table tbody tr.selected {
+  background-color: var(--hod-accent-light);
+}
+
+.hod-table tbody tr:not(.selected):hover {
+  background-color: var(--hod-bg-subtle);
+}
+
+.hod-name-cell {
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--hod-text-main);
+}
+
+.hod-status-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.hod-status-active {
+  background-color: #d1fae5;
+  color: #065f46;
+}
+
+.hod-status-inactive {
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+
+.hod-actions-cell {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.hod-action-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 500;
+  font-size: 0.9rem;
+  padding: 4px 2px;
+}
+
+.hod-action-edit {
+  color: var(--hod-accent);
+}
+
+.hod-action-delete {
+  color: #ef4444;
+}
+
+.hod-empty-row td {
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+  color: var(--hod-text-muted);
+}
+
+/* ============================================================
+   Detail card
+   ============================================================ */
+.hod-detail-card {
+  background: #fff;
+  padding: 1.75rem;
+  border-radius: 12px;
+  border: 1px solid var(--hod-accent-border);
+  border-top: 4px solid var(--hod-accent);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: relative;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+  animation: hod-fade-in 0.25s ease-in-out;
+}
+
+@keyframes hod-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.hod-detail-close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  background: var(--hod-bg-subtle);
+  border: none;
+  cursor: pointer;
+  color: var(--hod-text-muted);
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.15s ease;
+}
+
+.hod-detail-close:hover {
+  background: #e5e7eb;
+}
+
+.hod-detail-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--hod-text-main);
+  margin: 0;
+  padding-bottom: 15px;
+  border-bottom: 1px solid var(--hod-border);
+  font-size: 1.1rem;
+}
+
+.hod-detail-body {
+  display: flex;
+  gap: 25px;
+  align-items: flex-start;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.hod-detail-avatar {
+  width: 140px;
+  height: 140px;
+  border-radius: 12px;
+  object-fit: cover;
+  border: 3px solid var(--hod-accent);
+  background-color: #fff;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  flex-shrink: 0;
+}
+
+.hod-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(150px, auto) 1fr;
+  column-gap: 16px;
+  row-gap: 12px;
+  font-size: 0.95rem;
+  flex: 1;
+  min-width: 260px;
+  align-items: center;
+}
+
+.hod-detail-section-label {
+  grid-column: 1 / -1;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  margin-top: 12px;
+  background: var(--hod-accent-light);
+  color: var(--hod-accent-dark);
+}
+
+.hod-detail-grid strong {
+  color: var(--hod-text-muted);
+  font-weight: 500;
+}
+
+.hod-detail-grid span {
+  font-weight: 500;
+  color: var(--hod-text-main);
+  word-break: break-word;
+}
+
+/* ============================================================
+   Responsive
+   ============================================================ */
+@media (max-width: 640px) {
+  .hod-page-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .hod-modal {
+    width: 100%;
+  }
+
+  .hod-form-row {
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .hod-detail-body {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .hod-detail-grid {
+    grid-template-columns: minmax(130px, auto) 1fr;
+    width: 100%;
+  }
+}

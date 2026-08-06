@@ -1,0 +1,584 @@
+/* ============================================================
+   Parent.css
+   Styles for the Parent / Guardian Management page (Parents.jsx)
+   ============================================================ */
+
+:root {
+  --parent-accent: #d97706;
+  --parent-accent-light: #fef3c7;
+  --parent-accent-dark: #92400e;
+  --parent-border: #d1d5db;
+  --parent-border-strong: #9ca3af;
+  --parent-text-main: #111827;
+  --parent-text-muted: #6b7280;
+  --parent-bg-subtle: #f9fafb;
+  --parent-radius: 8px;
+}
+
+/* ---------- Page header ---------- */
+.parent-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+}
+
+.parent-page-header h1 {
+  margin: 0;
+}
+
+.parent-btn-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ============================================================
+   Modal
+   ============================================================ */
+.parent-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 24px;
+}
+
+.parent-modal {
+  background: #fff;
+  border-radius: 14px;
+  width: 460px;
+  max-width: 100%;
+  max-height: 88vh;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.parent-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 1.5rem 1.75rem 1.25rem;
+  border-bottom: 1px solid var(--parent-border);
+  flex-shrink: 0;
+}
+
+.parent-modal-header h2 {
+  margin: 0;
+  font-size: 1.2rem;
+  color: var(--parent-text-main);
+}
+
+/* Scrollable body: auto overflow, thin scrollbar that only appears when needed */
+.parent-modal-body {
+  padding: 1.5rem 1.75rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Custom slim scrollbar (WebKit) */
+.parent-modal-body::-webkit-scrollbar {
+  width: 6px;
+}
+.parent-modal-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+.parent-modal-body::-webkit-scrollbar-thumb {
+  background-color: #fcd34d;
+  border-radius: 999px;
+}
+.parent-modal-body::-webkit-scrollbar-thumb:hover {
+  background-color: var(--parent-accent);
+}
+/* Firefox */
+.parent-modal-body {
+  scrollbar-width: thin;
+  scrollbar-color: #fcd34d transparent;
+}
+
+.parent-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 1.25rem 1.75rem;
+  border-top: 1px solid var(--parent-border);
+  flex-shrink: 0;
+  background: var(--parent-bg-subtle);
+}
+
+/* ---------- Form sections ---------- */
+.parent-form-section {
+  margin-bottom: 1.5rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.parent-form-section:last-of-type {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.parent-form-section h3 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  margin: 0 0 1rem 0;
+  color: var(--parent-text-main);
+}
+
+.parent-form-section.credentials {
+  padding: 1.25rem;
+  border-radius: var(--parent-radius);
+  border: 1px solid #fde68a;
+  background: var(--parent-accent-light);
+  margin-bottom: 0;
+}
+
+.parent-form-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 1rem;
+}
+
+.parent-form-row:last-child {
+  margin-bottom: 0;
+}
+
+.parent-field {
+  flex: 1;
+  margin-bottom: 1rem;
+  min-width: 0; /* prevents flex items from overflowing their container */
+}
+
+.parent-form-row .parent-field {
+  margin-bottom: 0;
+}
+
+.parent-field:last-child {
+  margin-bottom: 0;
+}
+
+.parent-field label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--parent-text-main);
+}
+
+/* ---------- Inputs: always-visible, consistent borders ---------- */
+.parent-field input,
+.parent-field select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1.5px solid var(--parent-border);
+  background: #fff;
+  font-size: 0.95rem;
+  color: var(--parent-text-main);
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.parent-field input::placeholder {
+  color: #9ca3af;
+}
+
+.parent-field input:hover,
+.parent-field select:hover {
+  border-color: var(--parent-border-strong);
+}
+
+.parent-field input:focus,
+.parent-field select:focus {
+  outline: none;
+  border-color: var(--parent-accent);
+  box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.15);
+}
+
+.parent-field input:disabled {
+  background: #f3f4f6;
+  color: #374151;
+  font-weight: 600;
+  cursor: not-allowed;
+}
+
+.parent-field input[type="file"] {
+  border: 1.5px dashed var(--parent-border);
+  background: var(--parent-bg-subtle);
+  cursor: pointer;
+  padding: 9px 12px;
+}
+
+.parent-field input[type="file"]:hover {
+  border-color: var(--parent-accent);
+}
+
+/* ---------- Buttons ---------- */
+.parent-btn-cancel {
+  padding: 10px 18px;
+  border-radius: 6px;
+  border: 1.5px solid var(--parent-border);
+  background: #fff;
+  color: var(--parent-text-main);
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.parent-btn-cancel:hover {
+  background: var(--parent-bg-subtle);
+  border-color: var(--parent-border-strong);
+}
+
+.parent-btn-save {
+  padding: 10px 18px;
+  border-radius: 6px;
+}
+
+/* ============================================================
+   Table
+   ============================================================ */
+.parent-table-card {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  border: 1px solid #f0f0f2;
+  overflow: hidden;
+  margin-bottom: 2rem;
+}
+
+.parent-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.parent-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  min-width: 600px;
+}
+
+.parent-table thead tr {
+  background: var(--parent-bg-subtle);
+  border-bottom: 1px solid var(--parent-border);
+}
+
+.parent-table th {
+  padding: 1rem 1.5rem;
+  color: var(--parent-text-muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.parent-table td {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid #f0f0f2;
+  vertical-align: middle;
+}
+
+.parent-table tbody tr {
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.parent-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.parent-table tbody tr.selected {
+  background-color: #fffbeb;
+}
+
+.parent-table tbody tr:not(.selected):hover {
+  background-color: var(--parent-bg-subtle);
+}
+
+.parent-name-cell {
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--parent-text-main);
+}
+
+.parent-phone-cell {
+  font-weight: 500;
+  color: var(--parent-text-main);
+}
+
+.parent-actions-cell {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.parent-action-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 500;
+  font-size: 0.9rem;
+  padding: 4px 2px;
+}
+
+.parent-action-edit {
+  color: #3b82f6;
+}
+
+.parent-action-delete {
+  color: #ef4444;
+}
+
+.parent-empty-row td {
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+  color: var(--parent-text-muted);
+}
+
+/* ============================================================
+   Detail card
+   ============================================================ */
+.parent-detail-card {
+  background: #fff;
+  padding: 1.75rem;
+  border-radius: 12px;
+  border: 1px solid #fde68a;
+  border-top: 4px solid var(--parent-accent);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: relative;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+  animation: parent-fade-in 0.25s ease-in-out;
+}
+
+@keyframes parent-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.parent-detail-close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  background: var(--parent-bg-subtle);
+  border: none;
+  cursor: pointer;
+  color: var(--parent-text-muted);
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.15s ease;
+}
+
+.parent-detail-close:hover {
+  background: #e5e7eb;
+}
+
+.parent-detail-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--parent-text-main);
+  margin: 0;
+  padding-bottom: 15px;
+  border-bottom: 1px solid var(--parent-border);
+  font-size: 1.1rem;
+}
+
+.parent-detail-body {
+  display: flex;
+  gap: 30px;
+  align-items: flex-start;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.parent-detail-avatar {
+  width: 130px;
+  height: 130px;
+  border-radius: 12px;
+  object-fit: cover;
+  border: 3px solid var(--parent-accent);
+  background-color: #fff;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  flex-shrink: 0;
+}
+
+.parent-detail-avatar-placeholder {
+  width: 130px;
+  height: 130px;
+  border-radius: 12px;
+  border: 3px solid var(--parent-accent);
+  background-color: var(--parent-accent-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  flex-shrink: 0;
+}
+
+.parent-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(150px, auto) 1fr;
+  column-gap: 16px;
+  row-gap: 10px;
+  font-size: 0.95rem;
+  flex: 1;
+  min-width: 260px;
+  align-items: center;
+}
+
+.parent-detail-section-label {
+  grid-column: 1 / -1;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  background: var(--parent-accent-light);
+  color: var(--parent-accent-dark);
+}
+
+.parent-detail-section-label.login {
+  margin-top: 12px;
+}
+
+.parent-detail-grid strong {
+  color: var(--parent-text-muted);
+  font-weight: 500;
+}
+
+.parent-detail-grid span {
+  font-weight: 500;
+  color: var(--parent-text-main);
+  word-break: break-word;
+}
+
+/* ---------- Associated student sub-card ---------- */
+.parent-student-subcard {
+  margin-top: 20px;
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  padding: 15px 20px;
+  background: #f8fafc;
+  border-radius: 10px;
+  border: 1px solid #cbd5e1;
+  flex-wrap: wrap;
+}
+
+.parent-student-avatar {
+  width: 90px;
+  height: 90px;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 2px solid #94a3b8;
+  flex-shrink: 0;
+}
+
+.parent-student-avatar-placeholder {
+  width: 90px;
+  height: 90px;
+  border-radius: 8px;
+  border: 2px solid #cbd5e1;
+  background-color: #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.parent-student-grid {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) 1fr;
+  column-gap: 12px;
+  row-gap: 8px;
+  font-size: 0.95rem;
+  flex: 1;
+  min-width: 220px;
+  align-items: center;
+}
+
+.parent-student-grid-title {
+  grid-column: 1 / -1;
+  font-weight: 700;
+  color: #334155;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+}
+
+.parent-student-grid strong {
+  color: var(--parent-text-muted);
+  font-weight: 500;
+}
+
+.parent-student-grid span {
+  font-weight: 500;
+  color: var(--parent-text-main);
+  word-break: break-word;
+}
+
+.parent-student-status {
+  font-weight: 600;
+}
+
+/* ============================================================
+   Responsive
+   ============================================================ */
+@media (max-width: 640px) {
+  .parent-modal {
+    width: 100%;
+  }
+
+  .parent-form-row {
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .parent-detail-body {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .parent-detail-grid {
+    grid-template-columns: minmax(130px, auto) 1fr;
+    width: 100%;
+  }
+
+  .parent-student-subcard {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .parent-student-grid {
+    grid-template-columns: minmax(110px, auto) 1fr;
+    width: 100%;
+  }
+}

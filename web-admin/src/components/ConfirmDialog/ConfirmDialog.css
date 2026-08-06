@@ -1,0 +1,127 @@
+.cd-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+    backdrop-filter: blur(2px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    animation: cd-fade-in 0.15s ease-out;
+}
+
+@keyframes cd-fade-in {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+.cd-card {
+    position: relative;
+    background: #ffffff;
+    border-radius: 16px;
+    padding: 28px 24px 20px;
+    width: 100%;
+    max-width: 360px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.25);
+    text-align: center;
+    animation: cd-pop-in 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes cd-pop-in {
+    from {
+        opacity: 0;
+        transform: scale(0.92) translateY(8px);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+.cd-close {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    background: none;
+    border: none;
+    color: #9ca3af;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 6px;
+    display: flex;
+}
+
+.cd-close:hover {
+    background: #f3f4f6;
+    color: #4b5563;
+}
+
+.cd-icon-wrap {
+    width: 52px;
+    height: 52px;
+    margin: 0 auto 14px;
+    border-radius: 50%;
+    background: #FEE2E2;
+    color: #DC2626;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.cd-title {
+    font-size: 16px;
+    font-weight: 800;
+    color: #111827;
+    margin: 0 0 6px;
+}
+
+.cd-message {
+    font-size: 13.5px;
+    color: #6b7280;
+    line-height: 1.5;
+    margin: 0 0 20px;
+}
+
+.cd-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.cd-btn {
+    flex: 1;
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 13.5px;
+    font-weight: 700;
+    cursor: pointer;
+    border: none;
+    transition: background 0.15s, transform 0.1s;
+}
+
+.cd-btn:active {
+    transform: scale(0.97);
+}
+
+.cd-btn--cancel {
+    background: #f3f4f6;
+    color: #374151;
+}
+
+.cd-btn--cancel:hover {
+    background: #e5e7eb;
+}
+
+.cd-btn--confirm {
+    background: #DC2626;
+    color: #ffffff;
+}
+
+.cd-btn--confirm:hover {
+    background: #B91C1C;
+}
