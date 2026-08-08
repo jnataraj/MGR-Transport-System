@@ -337,8 +337,8 @@ model RouteVehicleAssignment {
   id            String    @id @default(uuid())
   routeId       String // logical route ID (e.g. RT-01)
   routeName     String // human label
-  vehicleId     String
-  vehicleNumber String
+  vehicleId     String?
+  vehicleNumber String?
   isActive      Boolean   @default(true)
   assignedAt    DateTime  @default(now())
   assignedBy    String    @default("admin")
