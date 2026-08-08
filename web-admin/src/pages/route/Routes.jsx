@@ -11,7 +11,7 @@ import {
   deactivateRoute,
   fetchVehicles,
 } from "../../api";
-import "./routes.css";
+import "./Routes.css";
 
 const getStatusStyles = (isActive) => {
   if (isActive) return { bg: "#DBEAFE", text: "#1D4ED8" };

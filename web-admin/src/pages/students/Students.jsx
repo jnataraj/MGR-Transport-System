@@ -3,7 +3,7 @@ import { GraduationCap, Plus, Edit, Trash2, Info, X } from "lucide-react";
 import Sidebar from "../../components/Sidebar";
 import Topbar from "../../components/Topbar";
 import { fetchUsers, createUser, fetchVehicles, updateUser, assignStudentBus, socket, deleteUser } from "../../api";
-import "./student.css";
+import "./Student.css";
 import ConfirmDialog from "../../components/ConfirmDialog/ConfirmDialog";
 import { handleImageChange } from "../../components/imageResize";
 

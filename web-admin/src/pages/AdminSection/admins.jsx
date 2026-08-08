@@ -15,7 +15,7 @@ import {
     deleteAdmin,
 } from "../../api";
 import { SECTOR_DEFAULT_PERMISSIONS } from "../../pages/config/permissions/permissions";
-import "./Admins.css";
+import "./admins.css";
 import ConfirmDialog from "../../components/ConfirmDialog/ConfirmDialog";
 
 const SECTION_COLORS = ["#DC2626", "#D97706", "#7C3AED", "#2563EB", "#059669"];

@@ -3,7 +3,7 @@ import { Component, Plus, Edit, Trash2, Info, X } from "lucide-react";
 import Sidebar from "../../components/Sidebar";
 import Topbar from "../../components/Topbar";
 import { fetchUsers, createUser, updateUser, deleteUser } from "../../api";
-import "./coordinator.css";
+import "./Coordinator.css";
 import ConfirmDialog from "../../components/ConfirmDialog/ConfirmDialog";
 import { handleImageChange } from "../../components/imageResize";
 
