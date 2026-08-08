@@ -135,6 +135,14 @@ export const deactivateRoute = async (id, removedBy = "admin") => {
   return handleResponse(response);
 };
 
+// Hard delete: permanently removes the route record from the database.
+export const deleteRoute = async (id) => {
+  const response = await fetch(`${API_BASE}/routes/${id}`, {
+    method: "DELETE",
+  });
+  return handleResponse(response);
+};
+
 export const fetchNotifications = async (token) => {
   const response = await fetch(`${API_BASE}/notifications`, {
     headers: {
@@ -343,6 +351,7 @@ export default {
   createRoute,
   updateRoute,
   deactivateRoute,
+  deleteRoute,
   fetchNotifications,
   sendNotification,
   markNotificationRead,

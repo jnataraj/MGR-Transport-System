@@ -6,5 +6,6 @@ router.get("/", routeController.getRoutes);
 router.post("/", routeController.createRoute);
 router.put("/:id", routeController.updateRoute);
 router.patch("/:id/deactivate", routeController.deactivateRoute);
+router.delete("/:id", routeController.deleteRoute);
 
 module.exports = router;

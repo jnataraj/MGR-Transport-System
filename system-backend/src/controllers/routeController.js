@@ -40,14 +40,14 @@ exports.createRoute = async (req, res) => {
       notes,
     } = req.body;
 
-    if (!routeId || !routeName || !vehicleId || !vehicleNumber) {
+    if (!routeId || !routeName) {
       return res.status(400).json({
-        error: "routeId, routeName, vehicleId and vehicleNumber are required",
+        error: "routeId and routeName are required",
       });
     }
 
     const route = await prisma.$transaction(async (tx) => {
-      if (isActive !== false) {
+      if (vehicleId && isActive !== false) {
         await tx.routeVehicleAssignment.updateMany({
           where: { vehicleId, isActive: true },
           data: {
@@ -62,8 +62,8 @@ exports.createRoute = async (req, res) => {
         data: {
           routeId,
           routeName,
-          vehicleId,
-          vehicleNumber,
+          vehicleId: vehicleId || null,
+          vehicleNumber: vehicleNumber || null,
           isActive: isActive ?? true,
           assignedBy: assignedBy || "admin",
           notes: notes || null,
@@ -173,5 +173,46 @@ exports.deactivateRoute = async (req, res) => {
       return res.status(404).json({ error: "Route not found" });
     }
     res.status(500).json({ error: "Failed to deactivate route" });
+  }
+};
+
+// DELETE /api/routes/:id
+// Hard delete: permanently removes the RouteVehicleAssignment row.
+// If the deleted record was active, also clears the route field on
+// the linked vehicle so the Vehicle table stays consistent.
+exports.deleteRoute = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Fetch before deleting so we can sync the vehicle afterwards.
+    const existing = await prisma.routeVehicleAssignment.findUnique({
+      where: { id },
+    });
+
+    if (!existing) {
+      return res.status(404).json({ error: "Route not found" });
+    }
+
+    await prisma.routeVehicleAssignment.delete({ where: { id } });
+
+    // If this assignment was active, clear the route field on the vehicle.
+    if (existing.isActive && existing.vehicleId) {
+      await prisma.vehicle
+        .update({
+          where: { id: existing.vehicleId },
+          data: { route: null },
+        })
+        .catch((e) =>
+          console.error("Error clearing vehicle route on delete:", e),
+        );
+    }
+
+    res.json({ success: true, message: "Route permanently deleted" });
+  } catch (error) {
+    console.error("deleteRoute error:", error);
+    if (error.code === "P2025") {
+      return res.status(404).json({ error: "Route not found" });
+    }
+    res.status(500).json({ error: "Failed to delete route" });
   }
 };

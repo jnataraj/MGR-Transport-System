@@ -8,7 +8,7 @@ import {
   fetchRoutes,
   createRoute,
   updateRoute,
-  deactivateRoute,
+  deleteRoute,
   fetchVehicles,
 } from "../../api";
 import "./Routes.css";
@@ -86,18 +86,15 @@ const RoutesPage = () => {
     }
   };
 
-  const confirmDeactivateRoute = async () => {
+  const confirmDeleteRoute = async () => {
     if (!deleteTarget) return;
     try {
-      const updated = await deactivateRoute(deleteTarget.id);
-      const updatedRow = mapAssignmentToRow(updated);
-      setData((prev) =>
-        prev.map((r) => (r.id === deleteTarget.id ? updatedRow : r)),
-      );
-      if (selectedRoute?.id === deleteTarget.id) setSelectedRoute(updatedRow);
+      await deleteRoute(deleteTarget.id);
+      setData((prev) => prev.filter((r) => r.id !== deleteTarget.id));
+      if (selectedRoute?.id === deleteTarget.id) setSelectedRoute(null);
     } catch (error) {
-      console.error("Error deactivating route:", error);
-      alert(error.message || "Unable to remove route.");
+      console.error("Error deleting route:", error);
+      alert(error.message || "Unable to delete route.");
     } finally {
       setDeleteTarget(null);
     }
@@ -108,6 +105,11 @@ const RoutesPage = () => {
     const formData = new FormData(e.target);
     const vehicleId = formData.get("vehicleId");
     const vehicle = vehicles.find((v) => v.id === vehicleId);
+
+    if (editRoute && !vehicleId) {
+      alert("Please assign a vehicle.");
+      return;
+    }
 
     if (editRoute) {
       try {
@@ -134,11 +136,19 @@ const RoutesPage = () => {
       }
     } else {
       try {
+        // const payload = {
+        //   routeId: formData.get("routeId"),
+        //   routeName: formData.get("routeName"),
+        //   vehicleId,
+        //   vehicleNumber: vehicle?.number || "",
+        //   isActive: formData.get("isActive") === "true",
+        //   notes: formData.get("notes"),
+        // };
         const payload = {
           routeId: formData.get("routeId"),
           routeName: formData.get("routeName"),
-          vehicleId,
-          vehicleNumber: vehicle?.number || "",
+          vehicleId: vehicleId || null,
+          vehicleNumber: vehicle?.number || null,
           isActive: formData.get("isActive") === "true",
           notes: formData.get("notes"),
         };
@@ -235,7 +245,7 @@ const RoutesPage = () => {
                           name="vehicleId"
                           defaultValue={editRoute?.vehicleId || ""}
                           onChange={handleVehicleChange}
-                          required
+                        // required
                         >
                           <option value="" disabled>
                             Select a vehicle
@@ -460,10 +470,10 @@ const RoutesPage = () => {
       </main>
       <ConfirmDialog
         open={!!deleteTarget}
-        title={`Remove route "${deleteTarget?.routeId}"?`}
-        message="This marks the route inactive rather than deleting it permanently."
-        confirmLabel="Remove"
-        onConfirm={confirmDeactivateRoute}
+        title={`Delete route "${deleteTarget?.routeId}"?`}
+        message="This will permanently delete the route from the database. This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteRoute}
         onCancel={() => setDeleteTarget(null)}
       />
     </div>

@@ -93,50 +93,63 @@ const unassignDriverFromExistingVehicle = async (tx, driverId) => {
 const syncVehicleRouteAssignment = async (tx, vehicle) => {
   const vehicleId = vehicle.id;
   const vehicleNumber = vehicle.number;
-  const routeName = vehicle.route;
+  const routeName = vehicle.route?.trim();
 
-  const existingActive = await tx.routeVehicleAssignment.findFirst({
-    where: { vehicleId, isActive: true },
-  });
-
-  if (!routeName || routeName.trim() === "") {
-    if (existingActive) {
-      await tx.routeVehicleAssignment.update({
-        where: { id: existingActive.id },
-        data: {
-          isActive: false,
-          removedAt: new Date(),
-          removedBy: "vehicle-sync",
-        },
-      });
-    }
+  // Vehicle has no route assigned
+  if (!routeName) {
     return;
   }
 
-  if (existingActive) {
-    if (
-      existingActive.routeName !== routeName ||
-      existingActive.vehicleNumber !== vehicleNumber
-    ) {
-      await tx.routeVehicleAssignment.update({
-        where: { id: existingActive.id },
-        data: { routeName, vehicleNumber },
-      });
-    }
-    return;
-  }
-
-  await tx.routeVehicleAssignment.create({
-    data: {
-      routeId: `AUTO-${vehicleId}`,
+  // Find an existing active route assignment with the same route name
+  // and without a vehicle assigned yet.
+  const existingRoute = await tx.routeVehicleAssignment.findFirst({
+    where: {
       routeName,
-      vehicleId,
-      vehicleNumber,
       isActive: true,
-      assignedBy: "vehicle-sync",
-      notes: "Auto-created from Vehicle Management",
+      vehicleId: null,
+    },
+    orderBy: {
+      assignedAt: "desc",
     },
   });
+
+  if (existingRoute) {
+    // Assign the vehicle to the existing route
+    await tx.routeVehicleAssignment.update({
+      where: {
+        id: existingRoute.id,
+      },
+      data: {
+        vehicleId,
+        vehicleNumber,
+        assignedBy: "vehicle-sync",
+      },
+    });
+
+    return;
+  }
+
+  // If the route is already assigned to this vehicle,
+  // just make sure the vehicle number is updated.
+  const existingVehicleAssignment =
+    await tx.routeVehicleAssignment.findFirst({
+      where: {
+        vehicleId,
+        routeName,
+        isActive: true,
+      },
+    });
+
+  if (existingVehicleAssignment) {
+    await tx.routeVehicleAssignment.update({
+      where: {
+        id: existingVehicleAssignment.id,
+      },
+      data: {
+        vehicleNumber,
+      },
+    });
+  }
 };
 
 const fetchVehicles = async (req, res) => {
