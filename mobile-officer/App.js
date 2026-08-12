@@ -3,7 +3,7 @@ import { View, ActivityIndicator } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { AuthProvider, useAuth } from "./src/context/AuthContext";
 import LoginScreen from "./src/screens/LoginScreen";
-import MainDashboard from "./src/screens/MainDashboard";
+import MainDashboard from "./src/MainDashboard";
 
 const ALLOWED_APP_ROLES = ["driver", "coordinator", "maintenance"];
 

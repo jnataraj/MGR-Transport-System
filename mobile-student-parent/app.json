@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "CTMS Student App",
-    "slug": "mobile-student-parent",
+    "slug": "student-main-app-js",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",

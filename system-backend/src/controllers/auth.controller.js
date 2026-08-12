@@ -113,6 +113,28 @@ const resolveVehicleForUser = async (user) => {
   return null;
 };
 
+const resolveVehiclesForUser = async (user) => {
+  const role = (user.role || "").toLowerCase();
+
+  if (role === "student") {
+    return (user.studentAssignments || [])
+      .map((assignment) => assignment.vehicle)
+      .filter(Boolean);
+  }
+
+  if (role === "driver") {
+    return user.vehicles || [];
+  }
+
+  if (role === "coordinator") {
+    return (user.coordinatorAssignments || [])
+      .map((assignment) => assignment.vehicle)
+      .filter(Boolean);
+  }
+
+  return [];
+};
+
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -197,14 +219,27 @@ exports.login = async (req, res) => {
       },
       process.env.JWT_SECRET,
       {
-        expiresIn: "1d",
+        expiresIn: "30d",
       },
     );
 
     const vehicleObj = await resolveVehicleForUser(user);
+    const assignedVehicles = await resolveVehiclesForUser(user);
     const assignedRoute = await resolveUserRoute(vehicleObj, user.id);
     const driverName = vehicleObj?.driver?.name || null;
     const role = (user.role || "").toLowerCase();
+
+    // Build a per-vehicle drivers array so the mobile app can look up
+    // the driver by vehicle number (used by getDriverForVehicle()).
+    const drivers = assignedVehicles
+      .filter((v) => v.driver)
+      .map((v) => ({
+        vehicleId: v.id,
+        vehicleNumber: v.number,
+        driverId: v.driver.id,
+        driverName: v.driver.name,
+        phone: v.driver.phone || null,
+      }));
 
     // Login success
     return res.status(200).json({
@@ -220,8 +255,13 @@ exports.login = async (req, res) => {
         year: user.year,
         vehicle: vehicleObj?.number || null,
         vehicleId: vehicleObj?.id || null,
+        // All assigned vehicles
+        vehicles: assignedVehicles,
+        vehicleIds: assignedVehicles.map((v) => v.id),
+        vehicleNumbers: assignedVehicles.map((v) => v.number),
         route: assignedRoute,
-        driverName: driverName,
+        driverName,
+        drivers,
         // Admin-specific access-control fields. Empty/null for
         // non-admin roles (driver, student, coordinator, parent).
         employeeId: user.employeeId || null,
@@ -277,9 +317,22 @@ exports.profile = async (req, res) => {
 
     const { password, ...safeUser } = user;
     const vehicleObj = await resolveVehicleForUser(user);
+    const assignedVehicles = await resolveVehiclesForUser(user);
     const assignedRoute = await resolveUserRoute(vehicleObj, user.id);
     const driverName = vehicleObj?.driver?.name || null;
     const role = (user.role || "").toLowerCase();
+
+    // Build a per-vehicle drivers array so the mobile app can look up
+    // the driver by vehicle number (used by getDriverForVehicle()).
+    const drivers = assignedVehicles
+      .filter((v) => v.driver)
+      .map((v) => ({
+        vehicleId: v.id,
+        vehicleNumber: v.number,
+        driverId: v.driver.id,
+        driverName: v.driver.name,
+        phone: v.driver.phone || null,
+      }));
 
     res.json({
       success: true,
@@ -288,8 +341,12 @@ exports.profile = async (req, res) => {
         role,
         vehicle: vehicleObj?.number || null,
         vehicleId: vehicleObj?.id || null,
+        vehicles: assignedVehicles,
+        vehicleIds: assignedVehicles.map((v) => v.id),
+        vehicleNumbers: assignedVehicles.map((v) => v.number),
         route: assignedRoute,
-        driverName: driverName,
+        driverName,
+        drivers,
         permissions:
           role === "deptadmin" ? parsePermissions(user.permissions) : [],
       },

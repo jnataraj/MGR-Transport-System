@@ -597,8 +597,9 @@ exports.getBusLiveLocation = async (req, res) => {
 };
 
 /**
- * Today's live attendance snapshot for a department.
+ * Today's live attendance snapshot for a department (or ALL departments).
  * GET /api/attendance/department-summary?department=Computer%20Science%20%26%20Engg.
+ * GET /api/attendance/department-summary?department=ALL   ← HoD all-dept view
  */
 exports.getDepartmentAttendanceSummary = async (req, res) => {
   try {
@@ -610,13 +611,21 @@ exports.getDepartmentAttendanceSummary = async (req, res) => {
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
 
+    // ── Resolve student filter ──────────────────────────────────────────────
+    const studentFilter =
+      department === "ALL"
+        ? { role: "student" }
+        : { role: "student", department };
+
     const students = await prisma.user.findMany({
-      where: { role: "student", department },
+      where: studentFilter,
       select: {
-        id: true, name: true, rollNumber: true, year: true,
+        id: true, name: true, rollNumber: true, year: true, department: true,
         studentAssignments: { include: { vehicle: true } },
       },
+      orderBy: [{ department: "asc" }, { name: "asc" }],
     });
+
     const studentIds = students.map((s) => s.id);
 
     const todayScans = await prisma.attendance.findMany({
@@ -628,6 +637,7 @@ exports.getDepartmentAttendanceSummary = async (req, res) => {
       orderBy: { scannedAt: "desc" },
     });
 
+    // Keep only the latest scan per student (first occurrence = most recent due to orderBy desc)
     const latestByStudent = {};
     for (const rec of todayScans) {
       if (!latestByStudent[rec.userId]) latestByStudent[rec.userId] = rec;
@@ -644,14 +654,30 @@ exports.getDepartmentAttendanceSummary = async (req, res) => {
         name: s.name,
         rollNumber: s.rollNumber,
         year: s.year,
+        department: s.department || "—",
         route: vehicle?.route || vehicle?.number || "—",
       };
       if (rec) {
         presentList.push({ ...base, stage: rec.stage, scannedAt: rec.scannedAt });
       } else {
+        // Only truly absent = no scan at all today
         absentList.push(base);
       }
     }
+
+    // ── Per-department breakdown (useful for ALL mode) ─────────────────────
+    const deptMap = {};
+    for (const s of students) {
+      const dept = s.department || "Unknown";
+      if (!deptMap[dept]) deptMap[dept] = { department: dept, total: 0, present: 0, absent: 0 };
+      deptMap[dept].total += 1;
+      if (latestByStudent[s.id]) {
+        deptMap[dept].present += 1;
+      } else {
+        deptMap[dept].absent += 1;
+      }
+    }
+    const deptBreakdown = Object.values(deptMap).sort((a, b) => a.department.localeCompare(b.department));
 
     return res.status(200).json({
       success: true,
@@ -661,6 +687,7 @@ exports.getDepartmentAttendanceSummary = async (req, res) => {
       absentCount: absentList.length,
       presentList,
       absentList,
+      deptBreakdown,
     });
   } catch (error) {
     console.error("getDepartmentAttendanceSummary Error:", error);

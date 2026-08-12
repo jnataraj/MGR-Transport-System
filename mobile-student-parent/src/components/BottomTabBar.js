@@ -1,30 +1,30 @@
-import React from "react";
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
+import { Home, User, Settings } from "lucide-react-native";
+
+const TABS = [
+    { key: "home", label: "Home", Icon: Home },
+    { key: "profile", label: "Profile", Icon: User },
+    { key: "settings", label: "Settings", Icon: Settings },
+];
 
 export default function BottomTabBar({ activeTab, onTabPress }) {
-    const tabs = [
-        { key: "home", label: "Home", icon: "🏠" },
-        { key: "profile", label: "Profile", icon: "👤" },
-        { key: "settings", label: "Settings", icon: "⚙️" },
-    ];
-
     return (
         <View style={styles.container}>
-            {tabs.map((tab) => {
-                const isActive = activeTab === tab.key;
+            {TABS.map(({ key, label, Icon }) => {
+                const isActive = activeTab === key;
                 return (
                     <TouchableOpacity
-                        key={tab.key}
+                        key={key}
                         style={styles.tabBtn}
                         activeOpacity={0.7}
-                        onPress={() => onTabPress(tab.key)}
+                        onPress={() => onTabPress(key)}
                     >
-                        <Text style={[styles.icon, isActive && styles.iconActive]}>
-                            {tab.icon}
-                        </Text>
-                        <Text style={[styles.label, isActive && styles.labelActive]}>
-                            {tab.label}
-                        </Text>
+                        <Icon
+                            size={22}
+                            color={isActive ? "#2563EB" : "#9CA3AF"}
+                            strokeWidth={isActive ? 2.4 : 2}
+                        />
+                        <Text style={[styles.label, isActive && styles.labelActive]}>{label}</Text>
                     </TouchableOpacity>
                 );
             })}
@@ -41,9 +41,7 @@ const styles = StyleSheet.create({
         paddingTop: 8,
         paddingBottom: 10,
     },
-    tabBtn: { flex: 1, alignItems: "center", justifyContent: "center" },
-    icon: { fontSize: 20, marginBottom: 2, opacity: 0.5 },
-    iconActive: { opacity: 1 },
+    tabBtn: { flex: 1, alignItems: "center", justifyContent: "center", gap: 3 },
     label: { fontSize: 11, fontWeight: "700", color: "#9CA3AF" },
     labelActive: { color: "#2563EB", fontWeight: "900" },
 });

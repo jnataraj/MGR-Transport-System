@@ -18,14 +18,41 @@ import { io } from "socket.io-client";
 import { API_BASE } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { registerForPushNotificationsAsync } from "../services/notificationService";
-// import logo from "../assets/logo.png";
-import logo from "../../assets/logo.png"
-// import QRCode from "react-native-qrcode-svg";
+import logo from "../../assets/logo.png";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import BottomTabBar from "../components/BottomTabBar";
 import LiveBusTrackingModal from "../components/LiveBusTrackingModal";
 import * as ImagePicker from "expo-image-picker";
 import jsQR from "jsqr";
+import {
+  GraduationCap,
+  MapPin,
+  QrCode,
+  History,
+  Navigation,
+  Bell,
+  Bus,
+  Landmark,
+  Home,
+  AlertTriangle,
+  BellOff,
+  Clock,
+  XCircle,
+  Shuffle,
+  Megaphone,
+  AlertCircle,
+  ChevronRight,
+  FileText,
+  X,
+  Inbox,
+  UserX,
+  BarChart2,
+  Download,
+  Upload,
+  User,
+  Phone,
+  CheckCircle,
+} from "lucide-react-native";
 
 const STAGE = {
   PICKUP: "PICKUP",
@@ -36,11 +63,19 @@ const STAGE = {
 };
 
 const STAGE_META = {
-  PICKUP: { label: "WAITING FOR\nMORNING PICKUP", icon: "📷", color: "#F59E0B" },
-  TO_COLLEGE: { label: "ONGOING:\nTRANSIT TO COLLEGE", icon: "🚌", color: "#10B981" },
-  AT_COLLEGE: { label: "ARRIVED:\nCOLLEGE", icon: "🏫", color: "#2563EB" },
-  TO_HOME: { label: "ONGOING:\nTRANSIT BACK HOME", icon: "🚌", color: "#10B981" },
-  AT_HOME: { label: "ARRIVED:\nHOME DESTINATION", icon: "🏡", color: "#475569" },
+  PICKUP: { label: "WAITING FOR\nMORNING PICKUP", Icon: QrCode, color: "#F59E0B" },
+  TO_COLLEGE: { label: "ONGOING:\nTRANSIT TO COLLEGE", Icon: Navigation, color: "#10B981" },
+  AT_COLLEGE: { label: "ARRIVED:\nCOLLEGE", Icon: Landmark, color: "#2563EB" },
+  TO_HOME: { label: "ONGOING:\nTRANSIT BACK HOME", Icon: Navigation, color: "#10B981" },
+  AT_HOME: { label: "ARRIVED:\nHOME DESTINATION", Icon: Home, color: "#475569" },
+};
+
+// Quick-action theme palette
+const ACTION_THEMES = {
+  qr: { bg: "#EFF6FF", fg: "#2563EB" },
+  history: { bg: "#FFF7ED", fg: "#F97316" },
+  tracking: { bg: "#ECFDF5", fg: "#10B981" },
+  alerts: { bg: "#FEF2F2", fg: "#EF4444" },
 };
 
 const mapBackendRole = (backendRole) => {
@@ -52,6 +87,9 @@ const mapBackendRole = (backendRole) => {
 
 export default function MainDashboard({ user, token, onLogout }) {
   const [boardStatus, setBoardStatus] = useState(STAGE.PICKUP);
+  const [currentVehicleNumber, setCurrentVehicleNumber] = useState(
+    user?.vehicle || null
+  );
   const inTransit = boardStatus === STAGE.TO_COLLEGE || boardStatus === STAGE.TO_HOME;
   // const [boardStatus, setBoardStatus] = useState("NOT_BOARDED");
   const [showHistoryModal, setShowHistoryModal] = useState(false);
@@ -64,6 +102,10 @@ export default function MainDashboard({ user, token, onLogout }) {
   // For Parent role: the linked student's resolved ID and name
   const [linkedStudentId, setLinkedStudentId] = useState(null);
   const [linkedStudentName, setLinkedStudentName] = useState(null);
+  // For Parent role: the linked student's full profile + live board status
+  const [childProfile, setChildProfile] = useState(null);        // { name, vehicle, route, driverName, ... }
+  const [childBoardStatus, setChildBoardStatus] = useState(STAGE.PICKUP);
+  const childInTransit = childBoardStatus === STAGE.TO_COLLEGE || childBoardStatus === STAGE.TO_HOME;
   // Live Bus Tracking map
   const [showLiveMapModal, setShowLiveMapModal] = useState(false);
   // Driven by the logged-in user's role rather than a demo toggle.
@@ -81,6 +123,7 @@ export default function MainDashboard({ user, token, onLogout }) {
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [scanFeedback, setScanFeedback] = useState(null);
+  const [assignedVehicles, setAssignedVehicles] = useState([]);
   const [scanEnabled, setScanEnabled] = useState(false);
   const isMorningLeg = boardStatus === STAGE.PICKUP || boardStatus === STAGE.TO_COLLEGE;
   const nextStageAfterScan = {
@@ -173,6 +216,187 @@ export default function MainDashboard({ user, token, onLogout }) {
     }
   }, [refreshProfile]);
 
+  // ── Fetch linked student profile + board status for Parent ──
+  useEffect(() => {
+    if (userRole !== "parent" || !userId || userId === "unknown-user") return;
+
+    const fetchChildData = async () => {
+      try {
+        // Step 1: find the student linked to this parent
+        const res = await fetch(`${API_BASE}/api/users?role=student`, {
+          headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        });
+        const data = await res.json();
+        const students = Array.isArray(data) ? data : (data.users || []);
+        const myStudent = students.find((s) => s.parentId === userId);
+
+        console.log("PARENT USER ID:", userId);
+        console.log("PARENT LINKED STUDENT:", myStudent);
+        // if (!myStudent) return;
+        //  // No linked student found
+
+        if (!myStudent) {
+          setLinkedStudentId(null);
+          setLinkedStudentName(null);
+          setChildProfile(null);
+          setChildBoardStatus(STAGE.PICKUP);
+          return;
+        }
+
+        setLinkedStudentId(myStudent.id);
+        setLinkedStudentName(myStudent.name);
+        console.log("PARENT LINKED STUDENT:", myStudent);
+
+        // Fetch the student's individual record to guarantee fresh driver data.
+        // The bulk /api/users?role=student list may not always have nested driver
+        // populated; the individual endpoint uses the same formatUser() with the
+        // full Prisma include, so it is the most reliable source.
+        let studentRecord = myStudent;
+        try {
+          const singleRes = await fetch(`${API_BASE}/api/users/${myStudent.id}`, {
+            headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          });
+          if (singleRes.ok) {
+            const singleData = await singleRes.json();
+            // /api/users/:id returns the user object directly (not wrapped)
+            if (singleData && singleData.id) {
+              studentRecord = singleData;
+              console.log("[Parent] fetched individual student record:", studentRecord);
+            }
+          }
+        } catch (fetchErr) {
+          console.log("[Parent] individual student fetch failed, using list data:", fetchErr.message);
+        }
+
+        const assignedVehicles = Array.isArray(studentRecord.vehicles)
+          ? studentRecord.vehicles
+          : (Array.isArray(myStudent.vehicles) ? myStudent.vehicles : []);
+
+        const assignedVehicle = assignedVehicles[0] || null;
+
+        // Resolve driverName from multiple sources, in priority order
+        const resolvedDriverName =
+          assignedVehicle?.driver?.name ||      // vehicle nested driver (most reliable)
+          studentRecord.driverName ||            // top-level driverName from formatUser
+          myStudent.driverName ||                // fallback to list data
+          null;
+
+        console.log("[Parent] resolved driverName:", resolvedDriverName, {
+          vehicleDriverName: assignedVehicle?.driver?.name,
+          studentRecordDriverName: studentRecord.driverName,
+          myStudentDriverName: myStudent.driverName,
+        });
+
+        setChildProfile({
+          id: myStudent.id,
+          name: myStudent.name,
+
+          vehicle:
+            assignedVehicle?.number ||
+            studentRecord.vehicleNumbers?.[0] ||
+            studentRecord.vehicle ||
+            myStudent.vehicleNumbers?.[0] ||
+            myStudent.vehicle ||
+            null,
+
+          vehicleId:
+            assignedVehicle?.id ||
+            studentRecord.vehicleIds?.[0] ||
+            studentRecord.vehicleId ||
+            myStudent.vehicleIds?.[0] ||
+            myStudent.vehicleId ||
+            null,
+
+          route:
+            assignedVehicle?.route ||
+            studentRecord.route ||
+            myStudent.route ||
+            null,
+
+          driverName: resolvedDriverName,
+
+          pickupTime:
+            studentRecord.pickupTime ||
+            myStudent.pickupTime ||
+            null,
+
+          vehicles: assignedVehicles,
+        });
+
+        // Step 2: fetch the student's current board status
+        try {
+          const statusRes = await fetch(
+            `${API_BASE}/api/attendance/current?userId=${myStudent.id}`,
+            { headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) } },
+          );
+          const statusData = await statusRes.json();
+          if (statusData.success) {
+            if (statusData.stage && STAGE_META[statusData.stage]) {
+              setChildBoardStatus(statusData.stage);
+            }
+
+            if (statusData.vehicleId) {
+              setChildProfile((prev) =>
+                prev
+                  ? {
+                    ...prev,
+                    vehicle: statusData.vehicleId,
+                  }
+                  : prev
+              );
+            }
+          }
+        } catch { /* silently fall back to PICKUP */ }
+
+      } catch (err) {
+        console.log("[Parent] fetchChildData error:", err.message);
+      }
+    };
+
+    fetchChildData();
+  }, [userRole, userId, token]);
+
+  useEffect(() => {
+    if (userRole !== "student" || !userId || userId === "unknown-user") return;
+
+    const loadAssignedVehicles = async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/users?role=student`,
+          { headers: authHeaders }
+        );
+
+        const data = await res.json();
+        const students = Array.isArray(data)
+          ? data
+          : (data.users || []);
+
+        const currentStudent = students.find(
+          (s) => String(s.id) === String(userId)
+        );
+
+        if (!currentStudent) return;
+
+        const vehicles = Array.isArray(currentStudent.vehicle)
+          ? currentStudent.vehicle
+          : String(
+            currentStudent.vehicle ||
+            currentStudent.vehicleNumber ||
+            ""
+          )
+            .split(",")
+            .map((v) => v.trim())
+            .filter(Boolean);
+
+        setAssignedVehicles(vehicles);
+      } catch (err) {
+        console.log("Load assigned vehicles error:", err.message);
+      }
+    };
+
+    loadAssignedVehicles();
+  }, [userRole, userId, token]);
+
   useEffect(() => {
     if (isBoardingQRModalOpen) {
       setScanned(false);
@@ -209,20 +433,42 @@ export default function MainDashboard({ user, token, onLogout }) {
     }
 
     const assignedVehicleId = user?.vehicleId;
-    const assignedVehicleNumber = user?.vehicle;
+
+    const assignedVehicleNumbers =
+      assignedVehicles.length > 0
+        ? assignedVehicles
+        : String(user?.vehicle || "")
+          .split(",")
+          .map((v) => v.trim())
+          .filter(Boolean);
+
+    const scannedVehicleNumber = String(
+      parsed.vehicleNumber || ""
+    ).trim();
+
     const matches =
-      (assignedVehicleId && parsed.vehicleId === assignedVehicleId) ||
-      (assignedVehicleNumber && parsed.vehicleNumber === assignedVehicleNumber);
+      (assignedVehicleId &&
+        parsed.vehicleId &&
+        String(parsed.vehicleId).trim() ===
+        String(assignedVehicleId).trim()) ||
+      assignedVehicleNumbers.some(
+        (vehicle) => vehicle === scannedVehicleNumber
+      );
 
     if (!matches) {
       setScanFeedback({
         type: "error",
-        message: `Wrong bus — this is ${parsed.vehicleNumber || "another vehicle"}. Your assigned bus is ${assignedVehicleNumber || "not set"}.`,
+        message: `Wrong bus — this is ${parsed.vehicleNumber || "another vehicle"
+          }. Your assigned buses are ${assignedVehicleNumbers.length
+            ? assignedVehicleNumbers.join(", ")
+            : "not set"
+          }.`,
       });
 
       if (refreshProfile) {
         refreshProfile();
       }
+
       setTimeout(() => setScanned(false), 2000);
       return;
     }
@@ -356,7 +602,8 @@ export default function MainDashboard({ user, token, onLogout }) {
 
     console.log("[handleScanQR] 📤 Sending attendance request:", {
       userId,
-      vehicleId: user?.vehicle || null,
+      // vehicleId: user?.vehicle || null,
+      vehicleId: vehicleNumber || null,
       type: "student_scan",
       direction: scanDirection,
       stage: targetStage,
@@ -371,7 +618,8 @@ export default function MainDashboard({ user, token, onLogout }) {
         headers: authHeaders,
         body: JSON.stringify({
           userId,
-          vehicleId: user?.vehicle || null,
+          // vehicleId: user?.vehicle || null,
+          vehicleId: vehicleNumber || null,
           type: "student_scan",
           direction: scanDirection,
           stage: targetStage,
@@ -507,8 +755,16 @@ export default function MainDashboard({ user, token, onLogout }) {
           headers: authHeaders,
         });
         const data = await res.json();
-        if (data.success && data.stage && STAGE_META[data.stage]) {
-          setBoardStatus(data.stage);
+        // if (data.success && data.stage && STAGE_META[data.stage]) {
+        //   setBoardStatus(data.stage);
+        // }
+        if (data.success) {
+          if (data.stage && STAGE_META[data.stage]) {
+            setBoardStatus(data.stage);
+          }
+          if (data.vehicleId) {
+            setCurrentVehicleNumber(data.vehicleId);
+          }
         }
       } catch (err) {
         console.log("Failed to fetch current attendance status:", err.message);
@@ -609,6 +865,24 @@ export default function MainDashboard({ user, token, onLogout }) {
     setShowLiveMapModal(true);
   };
 
+  const getDriverForVehicle = (vehicleNumber) => {
+    // Primary: look up from the per-vehicle drivers array returned by the backend
+    if (vehicleNumber && Array.isArray(user?.drivers) && user.drivers.length > 0) {
+      const driver = user.drivers.find(
+        (d) => String(d.vehicleNumber).trim() === String(vehicleNumber).trim()
+      );
+      if (driver?.driverName) return driver.driverName;
+    }
+
+    // Fallback 1: single driverName on the user object (from login/profile response)
+    if (user?.driverName) return user.driverName;
+
+    // Fallback 2: for parent role, use childProfile.driverName
+    if (userRole === "parent" && childProfile?.driverName) return childProfile.driverName;
+
+    return null;
+  };
+
   const confirmLogout = () => {
     if (Platform.OS === "web") {
       const confirm = window.confirm("Are you sure you want to log out?");
@@ -675,19 +949,20 @@ export default function MainDashboard({ user, token, onLogout }) {
               {/* Avatar Circle */}
               <View
                 style={{
-                  width: 52,
-                  height: 52,
-                  borderRadius: 26,
+                  width: 54,
+                  height: 54,
+                  borderRadius: 27,
                   backgroundColor: "#FFFFFF",
                   alignItems: "center",
                   justifyContent: "center",
                   marginRight: 14,
                   shadowColor: "#000",
-                  shadowOpacity: 0.1,
-                  shadowRadius: 4,
+                  shadowOpacity: 0.12,
+                  shadowRadius: 6,
+                  elevation: 3,
                 }}
               >
-                <Text style={{ fontSize: 26 }}>🎓</Text>
+                <GraduationCap size={26} color="#1D4ED8" strokeWidth={2.2} />
               </View>
 
               {/* User Info */}
@@ -750,17 +1025,20 @@ export default function MainDashboard({ user, token, onLogout }) {
                     {inTransit ? "IN TRANSIT" : "IDLE"}
                   </Text>
                 </View>
-                <Text
-                  style={{
-                    fontSize: 11,
-                    fontWeight: "800",
-                    color: "#FFFFFF",
-                    marginTop: 8,
-                    textAlign: "right",
-                  }}
-                >
-                  {(user?.route || "ROUTE 7 (THENI)").toUpperCase()}
-                </Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 8 }}>
+                  <MapPin size={11} color="#93C5FD" strokeWidth={2.5} />
+                  <Text
+                    style={{
+                      fontSize: 11,
+                      fontWeight: "800",
+                      color: "#FFFFFF",
+                      textAlign: "right",
+                    }}
+                    numberOfLines={1}
+                  >
+                    {(user?.route || "ROUTE 7 (THENI)").toUpperCase()}
+                  </Text>
+                </View>
               </View>
             </View>
           </View>
@@ -782,251 +1060,687 @@ export default function MainDashboard({ user, token, onLogout }) {
             </View>
           )}
 
-          {/* Grid Action Buttons */}
+          {/* QUICK ACTIONS */}
+          <Text style={{
+            fontSize: 11, fontWeight: "900", color: "#94A3B8",
+            letterSpacing: 1.4, marginHorizontal: 16,
+            marginBottom: 10, marginTop: 6,
+          }}></Text>
+
           <View
             style={{
               flexDirection: "row",
               flexWrap: "wrap",
-              justifyContent: "space-between",
-              paddingHorizontal: 16,
-              marginBottom: 6,
+              justifyContent: "flex-start",
+              paddingHorizontal: 20,
+              paddingLeft: 30,
+              marginBottom: 10,
+              columnGap: 12,
+              rowGap: 8,
             }}
           >
+
+            {/* Boarding QR */}
             {userRole === "student" && (
-              <TouchableOpacity
-                style={styles.sqBtn}
-                onPress={() => setIsBoardingQRModalOpen(true)}
-              >
-                <Text style={styles.sqBtnIcon}>📷</Text>
-                <Text style={styles.sqBtnText}>Boarding{"\n"}QR Code</Text>
-              </TouchableOpacity>
+              <View style={{ width: "46%", position: "relative" }}>
+                <TouchableOpacity
+                  style={[styles.sqBtn, { alignItems: "flex-start" }]}
+                  onPress={() => setIsBoardingQRModalOpen(true)}
+                  activeOpacity={0.75}
+                >
+                  {/* Icon bg */}
+                  <View style={{ width: 48, height: 48, borderRadius: 15, backgroundColor: ACTION_THEMES.qr.bg, alignItems: "center", justifyContent: "center" }}>
+                    <QrCode size={24} color={ACTION_THEMES.qr.fg} strokeWidth={2.2} />
+                  </View>
+                  {/* Label */}
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "flex-end",
+                      justifyContent: "space-between",
+                      width: "100%",
+                      marginTop: 8,
+                    }}
+                  >
+                    <Text style={styles.sqBtnText}>
+                      Boarding{"\n"}QR Code
+                    </Text>
+
+                    <View
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: 16,
+                        backgroundColor: ACTION_THEMES.qr.bg,
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <ChevronRight
+                        size={17}
+                        color={ACTION_THEMES.qr.fg}
+                        strokeWidth={2.5}
+                      />
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              </View>
             )}
 
+            {/* Travel History */}
             {!isHoD && (
-              <TouchableOpacity
-                style={styles.sqBtn}
-                onPress={() => {
-                  setShowHistoryModal(true);
-                  fetchTravelHistory();
-                }}
-              >
-                <Text style={styles.sqBtnIcon}>📜</Text>
-                <Text style={styles.sqBtnText}>Travel{"\n"}History</Text>
-              </TouchableOpacity>
+              <View style={{ width: "46%", position: "relative" }}>
+                <TouchableOpacity
+                  style={[styles.sqBtn, { alignItems: "flex-start" }]}
+                  onPress={() => { setShowHistoryModal(true); fetchTravelHistory(); }}
+                  activeOpacity={0.75}
+                >
+                  <View style={{ width: 48, height: 48, borderRadius: 15, backgroundColor: ACTION_THEMES.history.bg, alignItems: "center", justifyContent: "center" }}>
+                    <History size={24} color={ACTION_THEMES.history.fg} strokeWidth={2.2} />
+                  </View>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "flex-end",
+                      justifyContent: "space-between",
+                      width: "100%",
+                      marginTop: 8,
+                    }}
+                  >
+                    <Text style={styles.sqBtnText}>
+                      Travel{"\n"}History
+                    </Text>
+
+                    <View
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: 16,
+                        backgroundColor: ACTION_THEMES.history.bg,
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <ChevronRight
+                        size={17}
+                        color={ACTION_THEMES.history.fg}
+                        strokeWidth={2.5}
+                      />
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              </View>
             )}
 
+            {/* Live Bus Tracking */}
             {!isHoD && (
-              <TouchableOpacity
-                style={[
-                  styles.sqBtn,
-                  { opacity: inTransit ? 1 : 0.8 },
-                ]}
-                onPress={viewLiveLocation}
-              >
-                <Text style={styles.sqBtnIcon}>📍</Text>
-                <Text style={styles.sqBtnText}>Live Bus{"\n"}Tracking</Text>
-              </TouchableOpacity>
+              <View style={{ width: "46%", position: "relative" }}>
+                <TouchableOpacity
+                  style={[styles.sqBtn, { alignItems: "flex-start", opacity: inTransit ? 1 : 0.88 }]}
+                  onPress={viewLiveLocation}
+                  activeOpacity={0.75}
+                >
+                  <View style={{ width: 48, height: 48, borderRadius: 15, backgroundColor: ACTION_THEMES.tracking.bg, alignItems: "center", justifyContent: "center" }}>
+                    <MapPin size={24} color={ACTION_THEMES.tracking.fg} strokeWidth={2.2} />
+                  </View>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "flex-end",
+                      justifyContent: "space-between",
+                      width: "100%",
+                      marginTop: 8,
+                    }}
+                  >
+                    <Text style={styles.sqBtnText}>
+                      Live Bus{"\n"}Tracking
+                    </Text>
+
+                    <View
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: 16,
+                        backgroundColor: ACTION_THEMES.tracking.bg,
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <ChevronRight
+                        size={17}
+                        color={ACTION_THEMES.tracking.fg}
+                        strokeWidth={2.5}
+                      />
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              </View>
             )}
 
-            <View style={{ width: "48%", position: "relative" }}>
-              <TouchableOpacity
-                style={[
-                  styles.sqBtn,
-                  {
-                    width: "100%",
+            {/* Route Alerts */}
+            {!isHoD && (
+              <View style={{ width: "46%", position: "relative" }}>
+                <TouchableOpacity
+                  style={[styles.sqBtn, {
+                    alignItems: "flex-start",
                     borderColor: unreadAlerts > 0 ? "#FCA5A5" : "#F1F5F9",
-                    backgroundColor: unreadAlerts > 0 ? "#FEF2F2" : "#fff",
-                  },
-                ]}
-                onPress={() => {
-                  setShowRouteAlertsModal(true);
-                  setUnreadAlerts(0);
-                  const unreadOnes = routeAlerts.filter((a) => !a.isRead && !String(a.id).startsWith("demo-"));
-                  unreadOnes.forEach((alert) => {
-                    fetch(`${API_BASE}/api/notifications/${alert.id}/read`, {
-                      method: "PUT",
-                      headers: authHeaders,
-                    }).catch((err) => console.log("Failed to mark notification read:", err));
-                  });
-                  setRouteAlerts((prev) => prev.map((a) => ({ ...a, isRead: true })));
-                }}
-              >
-                <Text style={styles.sqBtnIcon}>🚨</Text>
-                <Text
-                  style={[
-                    styles.sqBtnText,
-                    { color: unreadAlerts > 0 ? "#DC2626" : "#475569" },
-                  ]}
-                >
-                  Route{"\n"}Alerts
-                </Text>
-              </TouchableOpacity>
-              {unreadAlerts > 0 && (
-                <View
-                  style={{
-                    position: "absolute",
-                    top: 4,
-                    right: 4,
-                    backgroundColor: "#EF4444",
-                    borderRadius: 10,
-                    minWidth: 20,
-                    height: 20,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    paddingHorizontal: 4,
+                    backgroundColor: unreadAlerts > 0 ? "#FEF2F2" : "#FFF",
+                  }]}
+                  onPress={() => {
+                    setShowRouteAlertsModal(true);
+                    setUnreadAlerts(0);
+                    const unreadOnes = routeAlerts.filter((a) => !a.isRead && !String(a.id).startsWith("demo-"));
+                    unreadOnes.forEach((alert) => {
+                      fetch(`${API_BASE}/api/notifications/${alert.id}/read`, { method: "PUT", headers: authHeaders })
+                        .catch((err) => console.log("mark read error:", err));
+                    });
+                    setRouteAlerts((prev) => prev.map((a) => ({ ...a, isRead: true })));
                   }}
+                  activeOpacity={0.75}
                 >
-                  <Text style={{ color: "#fff", fontSize: 11, fontWeight: "900" }}>
-                    {unreadAlerts > 9 ? "9+" : unreadAlerts}
-                  </Text>
-                </View>
-              )}
-            </View>
+                  <View style={{ width: 48, height: 48, borderRadius: 15, backgroundColor: ACTION_THEMES.alerts.bg, alignItems: "center", justifyContent: "center" }}>
+                    <Bell size={24} color={ACTION_THEMES.alerts.fg} strokeWidth={2.2} />
+                  </View>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "flex-end",
+                      justifyContent: "space-between",
+                      width: "100%",
+                      marginTop: 8,
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.sqBtnText,
+                        {
+                          textAlign: "left",
+                          color: unreadAlerts > 0 ? "#DC2626" : "#475569",
+                        },
+                      ]}
+                    >
+                      Route{"\n"}Alerts
+                    </Text>
+
+                    <View
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: 16,
+                        backgroundColor: ACTION_THEMES.alerts.bg,
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <ChevronRight
+                        size={17}
+                        color={ACTION_THEMES.alerts.fg}
+                        strokeWidth={2.5}
+                      />
+                    </View>
+                  </View>
+                </TouchableOpacity>
+                {unreadAlerts > 0 && (
+                  <View style={{ position: "absolute", top: 8, right: 8, backgroundColor: "#EF4444", borderRadius: 10, minWidth: 20, height: 20, alignItems: "center", justifyContent: "center", paddingHorizontal: 4, elevation: 4 }}>
+                    <Text style={{ color: "#fff", fontSize: 10, fontWeight: "900" }}>{unreadAlerts > 9 ? "9+" : unreadAlerts}</Text>
+                  </View>
+                )}
+              </View>
+            )}
           </View>
 
-          {/* Banner 1: YOUR ASSIGNED BUS Card */}
-          {!isHoD && user?.vehicle && user?.route && (
+          {/* ── YOUR ASSIGNED BUS Card ── (student only) */}
+          {!isHoD && userRole === "student" && user?.vehicle && user?.route && (
             <View
               style={{
                 backgroundColor: "#1E40AF",
-                borderRadius: 20,
+                borderRadius: 22,
                 padding: 20,
                 marginHorizontal: 16,
-                marginBottom: 16,
-                position: "relative",
+                marginBottom: 14,
                 overflow: "hidden",
-                elevation: 4,
+                elevation: 6,
                 shadowColor: "#1E40AF",
-                shadowOpacity: 0.2,
-                shadowRadius: 8,
+                shadowOffset: { width: 0, height: 8 },
+                shadowOpacity: 0.35,
+                shadowRadius: 12,
               }}
             >
+              {/* Top row: info + badge */}
               <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between" }}>
                 <View style={{ flex: 1, zIndex: 2 }}>
-                  <Text style={{ fontSize: 10, fontWeight: "900", color: "#93C5FD", letterSpacing: 1 }}>
-                    YOUR ASSIGNED BUS
+                  {/* Label */}
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                    <Bus size={10} color="#93C5FD" strokeWidth={2.4} />
+                    <Text style={{ fontSize: 10, fontWeight: "900", color: "#93C5FD", letterSpacing: 1.2 }}>YOUR ASSIGNED BUS</Text>
+                  </View>
+                  {/* Bus number */}
+                  <Text style={{ fontSize: 22, fontWeight: "900", color: "#FFFFFF", letterSpacing: 0.5 }} numberOfLines={1}>
+                    {/* {user?.vehicle} */}
+                    {currentVehicleNumber || user?.vehicle || "Not Assigned"}
                   </Text>
-                  <Text style={{ fontSize: 20, fontWeight: "900", color: "#FFFFFF", marginTop: 4 }}>
-                    {user?.vehicle} · {user?.route}
-                  </Text>
-                  <Text style={{ fontSize: 12, fontWeight: "600", color: "#DBEAFE", marginTop: 6 }}>
-                    Driver: {user?.driverName}
-                  </Text>
+                  {/* Route */}
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 4 }}>
+                    <MapPin size={11} color="#93C5FD" strokeWidth={2.4} />
+                    <Text style={{ fontSize: 13, fontWeight: "700", color: "#BFDBFE" }} numberOfLines={1}>
+                      {user?.route}
+                    </Text>
+                  </View>
+                  {/* Driver */}
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 6 }}>
+                    <User size={11} color="#BFDBFE" strokeWidth={2.2} />
+                    <Text style={{ fontSize: 12, fontWeight: "600", color: "#DBEAFE" }}>Driver: {getDriverForVehicle(currentVehicleNumber) || "—"}</Text>
+                  </View>
                 </View>
-                <View style={{ backgroundColor: "#10B981", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, zIndex: 2 }}>
-                  <Text style={{ fontSize: 10, fontWeight: "900", color: "#FFFFFF" }}>ON ROUTE</Text>
+                {/* ON ROUTE pill */}
+                <View style={{ backgroundColor: "#10B981", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, zIndex: 2, alignSelf: "flex-start" }}>
+                  <Text style={{ fontSize: 10, fontWeight: "900", color: "#FFFFFF", letterSpacing: 0.5 }}>ON ROUTE</Text>
                 </View>
               </View>
-              <Text style={{ fontSize: 55, position: "absolute", left: 10, bottom: -10, opacity: 0.15, color: "#FFF" }}>
-                🚌
-              </Text>
+              {/* Watermark bus */}
+              <View style={{ position: "absolute", right: -8, bottom: -12, opacity: 0.12, zIndex: 1 }}>
+                <Bus size={90} color="#FFFFFF" strokeWidth={1.2} />
+              </View>
             </View>
           )}
 
-          {/* Banner 2: LIVE TRANSIT MONITOR Card */}
-          {!isHoD && user?.vehicle && user?.route && (
+          {/* ── LIVE TRANSIT MONITOR Card ── (student only) */}
+          {!isHoD && userRole === "student" && user?.vehicle && user?.route && (
             <View
               style={{
                 backgroundColor: "#FFFFFF",
-                borderRadius: 20,
+                borderRadius: 22,
                 padding: 18,
                 marginHorizontal: 16,
+                marginBottom: 14,
                 borderWidth: 2,
                 borderColor: STAGE_META[boardStatus].color,
                 elevation: 3,
-                shadowColor: "#000",
-                shadowOpacity: 0.05,
-                shadowRadius: 6,
-                marginBottom: 16,
+                shadowColor: STAGE_META[boardStatus].color,
+                shadowOpacity: 0.15,
+                shadowRadius: 8,
+                shadowOffset: { width: 0, height: 4 },
               }}
             >
-              <View style={{ flexDirection: "row", alignItems: "center" }}>
-                <View style={{
-                  width: 48, height: 48, borderRadius: 14,
-                  backgroundColor: STAGE_META[boardStatus].color + "22",
-                  alignItems: "center", justifyContent: "center", marginRight: 14,
-                }}>
-                  <Text style={{ fontSize: 24 }}>{STAGE_META[boardStatus].icon}</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 10, fontWeight: "900", color: STAGE_META[boardStatus].color, letterSpacing: 1.2, marginBottom: 2 }}>
-                    LIVE TRANSIT MONITOR
-                  </Text>
-                  <Text style={{ fontSize: 15, fontWeight: "900", color: STAGE_META[boardStatus].color, lineHeight: 18 }}>
-                    {STAGE_META[boardStatus].label}
-                  </Text>
-                </View>
-                <View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: STAGE_META[boardStatus].color }} />
-              </View>
-
-              <View style={{ backgroundColor: "#FEF2F2", borderRadius: 8, padding: 8, marginTop: 12, borderLeftWidth: 3, borderLeftColor: "#EF4444" }}>
-                <Text style={{ fontSize: 11, fontWeight: "800", color: "#DC2626" }}>
-                  ⚠️ REMINDER: <Text style={{ color: "#EF4444", fontWeight: "600" }}>Scan QR before Entry & Drop</Text>
-                </Text>
-              </View>
+              {(() => {
+                const meta = STAGE_META[boardStatus];
+                const StageIcon = meta.Icon;
+                return (
+                  <>
+                    {/* Header row */}
+                    <View style={{ flexDirection: "row", alignItems: "center" }}>
+                      {/* Stage icon bg */}
+                      <View style={{
+                        width: 52, height: 52, borderRadius: 16,
+                        backgroundColor: meta.color + "18",
+                        alignItems: "center", justifyContent: "center", marginRight: 14,
+                        borderWidth: 1.5, borderColor: meta.color + "30",
+                      }}>
+                        <StageIcon size={24} color={meta.color} strokeWidth={2.2} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 9, fontWeight: "900", color: meta.color, letterSpacing: 1.5, marginBottom: 3 }}>
+                          LIVE TRANSIT MONITOR
+                        </Text>
+                        <Text style={{ fontSize: 14, fontWeight: "900", color: meta.color, lineHeight: 19 }}>
+                          {meta.label}
+                        </Text>
+                      </View>
+                      {/* Animated status dot */}
+                      <View style={{ alignItems: "center", gap: 3 }}>
+                        <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: meta.color }} />
+                        <Text style={{ fontSize: 7, fontWeight: "800", color: meta.color, letterSpacing: 0.5 }}>LIVE</Text>
+                      </View>
+                    </View>
+                    {/* Reminder bar */}
+                    <View style={{
+                      backgroundColor: "#FEF2F2", borderRadius: 10, paddingVertical: 10,
+                      paddingHorizontal: 12, marginTop: 14,
+                      borderLeftWidth: 3, borderLeftColor: "#EF4444",
+                      flexDirection: "row", alignItems: "center", gap: 8,
+                    }}>
+                      <AlertTriangle size={13} color="#EF4444" strokeWidth={2.4} />
+                      <Text style={{ fontSize: 11, fontWeight: "700", color: "#DC2626", flex: 1 }}>
+                        Scan QR before{" "}
+                        <Text style={{ fontWeight: "900" }}>Entry & Drop</Text>
+                      </Text>
+                    </View>
+                  </>
+                );
+              })()}
             </View>
           )}
 
-          {/* Banner 3: ROUTE PROGRESS TRACKING Card */}
-          {!isHoD && user?.vehicle && user?.route && (
+          {/* ── ROUTE PROGRESS TRACKING Card ── (student only) */}
+          {!isHoD && userRole === "student" && user?.vehicle && user?.route && (
             <View
               style={{
                 backgroundColor: "#FFFFFF",
-                borderRadius: 20,
-                padding: 20,
+                borderRadius: 22,
+                paddingTop: 18,
+                paddingBottom: 24,
+                paddingHorizontal: 20,
                 marginHorizontal: 16,
                 marginBottom: 16,
                 borderWidth: 1,
                 borderColor: "#F1F5F9",
-                elevation: 2,
-                shadowColor: "#000",
-                shadowOpacity: 0.04,
-                shadowRadius: 6,
+                elevation: 3,
+                shadowColor: "#0F172A",
+                shadowOpacity: 0.05,
+                shadowRadius: 8,
+                shadowOffset: { width: 0, height: 2 },
               }}
             >
-              <Text style={{ fontSize: 11, fontWeight: "900", color: "#94A3B8", letterSpacing: 1, marginBottom: 20 }}>
-                ROUTE PROGRESS TRACKING — {isMorningLeg ? "MORNING" : "EVENING"} LEG
+              {/* Title */}
+              <Text style={{ fontSize: 11, fontWeight: "900", color: "#94A3B8", letterSpacing: 1.2, marginBottom: 24 }}>
+                ROUTE PROGRESS — {isMorningLeg ? "MORNING" : "EVENING"} LEG
               </Text>
 
               {(() => {
                 const legStops = isMorningLeg
                   ? [
-                    { key: STAGE.PICKUP, label: "PICKUP" },
-                    { key: STAGE.TO_COLLEGE, label: "IN-ROUTE" },
-                    { key: STAGE.AT_COLLEGE, label: "COLLEGE" },
+                    { key: STAGE.PICKUP, label: "PICKUP", Icon: Bus },
+                    { key: STAGE.TO_COLLEGE, label: "IN-ROUTE", Icon: Navigation },
+                    { key: STAGE.AT_COLLEGE, label: "COLLEGE", Icon: Landmark },
                   ]
                   : [
-                    { key: STAGE.AT_COLLEGE, label: "COLLEGE" },
-                    { key: STAGE.TO_HOME, label: "IN-ROUTE" },
-                    { key: STAGE.AT_HOME, label: "HOME" },
+                    { key: STAGE.AT_COLLEGE, label: "COLLEGE", Icon: Landmark },
+                    { key: STAGE.TO_HOME, label: "IN-ROUTE", Icon: Navigation },
+                    { key: STAGE.AT_HOME, label: "HOME", Icon: Home },
                   ];
+
                 const stepIndex = legStops.findIndex((s) => s.key === boardStatus);
-                const activeIndex = stepIndex === -1 ? 0 : stepIndex;
-                const progressPct = activeIndex === 0 ? "0%" : activeIndex === 1 ? "50%" : "100%";
+                const activeIdx = stepIndex === -1 ? 0 : stepIndex;
                 const activeColor = STAGE_META[boardStatus].color;
 
+                /* Track width: "0%", "50%", "100%" */
+                const trackFill = activeIdx === 0 ? "0%" : activeIdx === 1 ? "50%" : "100%";
+
                 return (
-                  <View style={{ position: "relative", paddingHorizontal: 10 }}>
-                    <View style={{ position: "absolute", top: 10, left: 20, right: 20, height: 4, backgroundColor: "#E2E8F0" }} />
-                    <View style={{ position: "absolute", top: 10, left: 20, width: progressPct, height: 4, backgroundColor: activeColor }} />
+                  <View style={{ position: "relative" }}>
+                    {/* Grey base track */}
+                    <View style={{
+                      position: "absolute", top: 21, left: 21, right: 21,
+                      height: 4, backgroundColor: "#E2E8F0", borderRadius: 2,
+                    }} />
+                    {/* Colored fill track */}
+                    <View style={{
+                      position: "absolute", top: 21, left: 21,
+                      width: trackFill, height: 4,
+                      backgroundColor: activeColor, borderRadius: 2,
+                    }} />
+
+                    {/* Stop nodes */}
                     <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                      {legStops.map((stop, i) => (
-                        <View key={stop.key} style={{ alignItems: "center" }}>
-                          <View style={{
-                            width: 22, height: 22, borderRadius: 11, borderWidth: 3, borderColor: "#FFFFFF",
-                            backgroundColor: i <= activeIndex ? activeColor : "#CBD5E1",
-                          }} />
-                          <Text style={{ fontSize: 10, fontWeight: "900", color: i <= activeIndex ? "#334155" : "#94A3B8", marginTop: 8 }}>
-                            {stop.label}
-                          </Text>
-                        </View>
-                      ))}
+                      {legStops.map((stop, i) => {
+                        const done = i <= activeIdx;
+                        const StatusText = i < activeIdx ? "Done" : i === activeIdx ? "Active" : "Next";
+                        const StopIconComp = stop.Icon;
+                        return (
+                          <View key={stop.key} style={{ alignItems: "center", flex: 1 }}>
+                            {/* Circle icon */}
+                            <View style={{
+                              width: 44, height: 44, borderRadius: 22,
+                              backgroundColor: done ? activeColor : "#F1F5F9",
+                              alignItems: "center", justifyContent: "center",
+                              borderWidth: done ? 0 : 2,
+                              borderColor: "#E2E8F0",
+                              elevation: done ? 4 : 1,
+                              shadowColor: done ? activeColor : "#000",
+                              shadowOpacity: done ? 0.25 : 0.04,
+                              shadowRadius: done ? 6 : 2,
+                              shadowOffset: { width: 0, height: done ? 3 : 1 },
+                            }}>
+                              <StopIconComp size={18} color={done ? "#FFF" : "#CBD5E1"} strokeWidth={2.2} />
+                            </View>
+                            {/* Label */}
+                            <Text style={{
+                              fontSize: 10, fontWeight: "900", marginTop: 8,
+                              color: done ? "#1E293B" : "#94A3B8",
+                            }}>{stop.label}</Text>
+                            {/* Sub status */}
+                            <View style={{
+                              marginTop: 3, paddingHorizontal: 6, paddingVertical: 2,
+                              borderRadius: 6,
+                              backgroundColor: i === activeIdx ? activeColor + "18" : "transparent",
+                            }}>
+                              <Text style={{
+                                fontSize: 8, fontWeight: "800",
+                                color: i === activeIdx ? activeColor : "#CBD5E1",
+                              }}>{StatusText}</Text>
+                            </View>
+                          </View>
+                        );
+                      })}
                     </View>
                   </View>
                 );
               })()}
             </View>
           )}
+
+          {/* ══════════════════════════════════════════════════════════
+               PARENT VIEW — CHILD TRANSIT CARDS
+               Visible only when userRole === "parent" and a linked
+               student with an assigned bus is found.
+          ══════════════════════════════════════════════════════════ */}
+          {/* {userRole === "parent" && childProfile?.vehicle && childProfile?.route && (() => { */}
+          {userRole === "parent" && childProfile?.id && (() => {
+            const childMeta = STAGE_META[childBoardStatus];
+            const ChildStageIcon = childMeta.Icon;
+            const childIsMorning = childBoardStatus === STAGE.PICKUP || childBoardStatus === STAGE.TO_COLLEGE;
+            const childLegStops = childIsMorning
+              ? [
+                { key: STAGE.PICKUP, label: "PICKUP", Icon: Bus },
+                { key: STAGE.TO_COLLEGE, label: "IN-ROUTE", Icon: Navigation },
+                { key: STAGE.AT_COLLEGE, label: "COLLEGE", Icon: Landmark },
+              ]
+              : [
+                { key: STAGE.AT_COLLEGE, label: "COLLEGE", Icon: Landmark },
+                { key: STAGE.TO_HOME, label: "IN-ROUTE", Icon: Navigation },
+                { key: STAGE.AT_HOME, label: "HOME", Icon: Home },
+              ];
+            const childActiveIdx = Math.max(0, childLegStops.findIndex((s) => s.key === childBoardStatus));
+            const childTrackFill = childActiveIdx === 0 ? "0%" : childActiveIdx === 1 ? "50%" : "100%";
+            const childActiveColor = childMeta.color;
+
+            return (
+              <>
+                {/* ── Child Assigned Bus Card ── */}
+                <View
+                  style={{
+                    backgroundColor: "#1E40AF",
+                    borderRadius: 22,
+                    padding: 20,
+                    marginHorizontal: 16,
+                    marginBottom: 14,
+                    overflow: "hidden",
+                    elevation: 6,
+                    shadowColor: "#1E40AF",
+                    shadowOffset: { width: 0, height: 8 },
+                    shadowOpacity: 0.35,
+                    shadowRadius: 12,
+                  }}
+                >
+                  <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between" }}>
+                    <View style={{ flex: 1, zIndex: 2 }}>
+                      {/* Label with child icon */}
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                        <Bus size={10} color="#93C5FD" strokeWidth={2.4} />
+                        <Text style={{ fontSize: 10, fontWeight: "900", color: "#93C5FD", letterSpacing: 1.2 }}>CHILD'S ASSIGNED BUS</Text>
+                      </View>
+                      {/* Bus number */}
+                      <Text style={{ fontSize: 22, fontWeight: "900", color: "#FFFFFF", letterSpacing: 0.5 }} numberOfLines={1}>
+                        {childProfile.vehicle}
+                        {/* {user?.vehicle} */}
+                      </Text>
+                      {/* Route */}
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 4 }}>
+                        <MapPin size={11} color="#93C5FD" strokeWidth={2.4} />
+                        <Text style={{ fontSize: 13, fontWeight: "700", color: "#BFDBFE" }} numberOfLines={1}>
+                          {childProfile.route}
+                        </Text>
+                      </View>
+                      {/* Driver */}
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 6 }}>
+                        <User size={11} color="#BFDBFE" strokeWidth={2.2} />
+                        <Text style={{ fontSize: 12, fontWeight: "600", color: "#DBEAFE" }}>
+                          Driver: {childProfile.driverName || "—"}
+                        </Text>
+                      </View>
+                      {childProfile.pickupTime && (
+                        <Text style={{ fontSize: 11, fontWeight: "600", color: "#DBEAFE", marginTop: 2, marginLeft: 16 }}>
+                          Dep. {childProfile.pickupTime}
+                        </Text>
+                      )}
+                      {/* Child name tag */}
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 8 }}>
+                        <User size={10} color="#60A5FA" strokeWidth={2} />
+                        <Text style={{ fontSize: 11, fontWeight: "700", color: "#93C5FD" }}>
+                          Child: {childProfile.name}
+                        </Text>
+                      </View>
+                    </View>
+                    {/* Status pill */}
+                    <View style={{
+                      backgroundColor: childInTransit ? "#10B981" : "#F59E0B",
+                      paddingHorizontal: 12, paddingVertical: 6,
+                      borderRadius: 20, zIndex: 2, alignSelf: "flex-start",
+                    }}>
+                      <Text style={{ fontSize: 10, fontWeight: "900", color: "#FFFFFF", letterSpacing: 0.5 }}>
+                        {childInTransit ? "ON ROUTE" : "IDLE"}
+                      </Text>
+                    </View>
+                  </View>
+                  {/* Watermark */}
+                  <View style={{ position: "absolute", right: -8, bottom: -12, opacity: 0.12, zIndex: 1 }}>
+                    <Bus size={90} color="#FFFFFF" strokeWidth={1.2} />
+                  </View>
+                </View>
+
+                {/* ── Live Child Transit Monitor Card ── */}
+                <View
+                  style={{
+                    backgroundColor: "#FFFFFF",
+                    borderRadius: 22,
+                    padding: 18,
+                    marginHorizontal: 16,
+                    marginBottom: 14,
+                    borderWidth: 2,
+                    borderColor: childActiveColor,
+                    elevation: 3,
+                    shadowColor: childActiveColor,
+                    shadowOpacity: 0.15,
+                    shadowRadius: 8,
+                    shadowOffset: { width: 0, height: 4 },
+                  }}
+                >
+                  {/* Header row */}
+                  <View style={{ flexDirection: "row", alignItems: "center" }}>
+                    <View style={{
+                      width: 52, height: 52, borderRadius: 16,
+                      backgroundColor: childActiveColor + "18",
+                      alignItems: "center", justifyContent: "center", marginRight: 14,
+                      borderWidth: 1.5, borderColor: childActiveColor + "30",
+                    }}>
+                      <ChildStageIcon size={24} color={childActiveColor} strokeWidth={2.2} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 9, fontWeight: "900", color: childActiveColor, letterSpacing: 1.5, marginBottom: 2 }}>
+                        LIVE CHILD TRANSIT MONITOR
+                      </Text>
+                      <Text style={{ fontSize: 14, fontWeight: "900", color: childActiveColor, lineHeight: 19 }}>
+                        {childMeta.label}
+                      </Text>
+                    </View>
+                    {/* Live dot */}
+                    <View style={{ alignItems: "center", gap: 3 }}>
+                      <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: childActiveColor }} />
+                      <Text style={{ fontSize: 7, fontWeight: "800", color: childActiveColor, letterSpacing: 0.5 }}>LIVE</Text>
+                    </View>
+                  </View>
+
+                  {/* Child name strip */}
+                  <View style={{
+                    flexDirection: "row", alignItems: "center", gap: 8,
+                    backgroundColor: childActiveColor + "10",
+                    borderRadius: 10, paddingVertical: 8, paddingHorizontal: 12,
+                    marginTop: 14,
+                  }}>
+                    <User size={13} color={childActiveColor} strokeWidth={2.2} />
+                    <Text style={{ fontSize: 12, fontWeight: "800", color: childActiveColor }}>
+                      Child: {childProfile.name}
+                    </Text>
+                  </View>
+
+                  {/* Route progress tracker */}
+                  <View style={{ marginTop: 18, position: "relative" }}>
+                    {/* Grey track */}
+                    <View style={{ position: "absolute", top: 21, left: 21, right: 21, height: 4, backgroundColor: "#E2E8F0", borderRadius: 2 }} />
+                    {/* Colored fill */}
+                    <View style={{ position: "absolute", top: 21, left: 21, width: childTrackFill, height: 4, backgroundColor: childActiveColor, borderRadius: 2 }} />
+                    {/* Stops */}
+                    <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                      {childLegStops.map((stop, i) => {
+                        const done = i <= childActiveIdx;
+                        const StatusText = i < childActiveIdx ? "Done" : i === childActiveIdx ? "Active" : "Next";
+                        const StopIconComp = stop.Icon;
+                        return (
+                          <View key={stop.key} style={{ alignItems: "center", flex: 1 }}>
+                            <View style={{
+                              width: 44, height: 44, borderRadius: 22,
+                              backgroundColor: done ? childActiveColor : "#F1F5F9",
+                              alignItems: "center", justifyContent: "center",
+                              borderWidth: done ? 0 : 2,
+                              borderColor: "#E2E8F0",
+                              elevation: done ? 4 : 1,
+                              shadowColor: done ? childActiveColor : "#000",
+                              shadowOpacity: done ? 0.25 : 0.04,
+                              shadowRadius: done ? 6 : 2,
+                              shadowOffset: { width: 0, height: done ? 3 : 1 },
+                            }}>
+                              <StopIconComp size={18} color={done ? "#FFF" : "#CBD5E1"} strokeWidth={2.2} />
+                            </View>
+                            <Text style={{ fontSize: 10, fontWeight: "900", marginTop: 8, color: done ? "#1E293B" : "#94A3B8" }}>
+                              {stop.label}
+                            </Text>
+                            <View style={{
+                              marginTop: 3, paddingHorizontal: 6, paddingVertical: 2,
+                              borderRadius: 6,
+                              backgroundColor: i === childActiveIdx ? childActiveColor + "18" : "transparent",
+                            }}>
+                              <Text style={{ fontSize: 8, fontWeight: "800", color: i === childActiveIdx ? childActiveColor : "#CBD5E1" }}>
+                                {StatusText}
+                              </Text>
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </View>
+
+                  {/* Trip direction footer */}
+                  <View style={{
+                    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+                    marginTop: 16, paddingTop: 12,
+                    borderTopWidth: 1, borderTopColor: "#F1F5F9",
+                  }}>
+                    <Text style={{ fontSize: 10, fontWeight: "700", color: "#94A3B8", letterSpacing: 0.5 }}>
+                      TRIP: {childIsMorning ? "TO COLLEGE" : "TO HOME"}
+                    </Text>
+                    <View style={{
+                      backgroundColor: childInTransit ? "#10B981" : "#EF4444",
+                      paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12,
+                    }}>
+                      <Text style={{ fontSize: 9, fontWeight: "900", color: "#FFF" }}>
+                        {childInTransit ? "ON BUS" : "NOT BOARDED"}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              </>
+            );
+          })()}
 
           {/* Map Modal */}
           <Modal
@@ -1163,7 +1877,7 @@ export default function MainDashboard({ user, token, onLogout }) {
                 <View
                   style={{ flexDirection: "row", alignItems: "center", gap: 10 }}
                 >
-                  <Text style={{ fontSize: 20 }}>🚨</Text>
+                  <Bell size={20} color="#FFFFFF" strokeWidth={2.2} />
                   <Text style={{ color: "white", fontSize: 16, fontWeight: "900" }}>
                     Route Alerts
                   </Text>
@@ -1191,7 +1905,9 @@ export default function MainDashboard({ user, token, onLogout }) {
                       paddingTop: 80,
                     }}
                   >
-                    <Text style={{ fontSize: 50, marginBottom: 16 }}>🔕</Text>
+                    <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "#F1F5F9", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+                      <BellOff size={32} color="#94A3B8" strokeWidth={1.8} />
+                    </View>
                     <Text
                       style={{ fontWeight: "800", color: "#6B7280", fontSize: 15 }}
                     >
@@ -1205,8 +1921,7 @@ export default function MainDashboard({ user, token, onLogout }) {
                         textAlign: "center",
                       }}
                     >
-                      When admin sends a route alert, it will{"\n"}appear here
-                      instantly
+                      When admin sends a route alert, it will{"\n"}appear here instantly
                     </Text>
                   </View>
                 ) : (
@@ -1227,7 +1942,7 @@ export default function MainDashboard({ user, token, onLogout }) {
                     {routeAlerts.map((alert, idx) => {
                       const typeMap = {
                         RouteDelayed: {
-                          emoji: "⏰",
+                          Icon: Clock,
                           label: "Route Delayed",
                           bgColor: "#FFFBEB",
                           leftColor: "#D97706",
@@ -1235,7 +1950,7 @@ export default function MainDashboard({ user, token, onLogout }) {
                           tagText: "#92400E",
                         },
                         RouteCancelled: {
-                          emoji: "❌",
+                          Icon: XCircle,
                           label: "Route Cancelled",
                           bgColor: "#FEF2F2",
                           leftColor: "#DC2626",
@@ -1243,7 +1958,7 @@ export default function MainDashboard({ user, token, onLogout }) {
                           tagText: "#991B1B",
                         },
                         NewPath: {
-                          emoji: "🔀",
+                          Icon: Shuffle,
                           label: "New Path / Diversion",
                           bgColor: "#EFF6FF",
                           leftColor: "#2563EB",
@@ -1251,7 +1966,7 @@ export default function MainDashboard({ user, token, onLogout }) {
                           tagText: "#1D4ED8",
                         },
                         General: {
-                          emoji: "📢",
+                          Icon: Megaphone,
                           label: "Notice",
                           bgColor: "#EFF6FF",
                           leftColor: "#2563EB",
@@ -1260,7 +1975,7 @@ export default function MainDashboard({ user, token, onLogout }) {
                         },
                       };
                       const t = typeMap[alert.notificationType] || {
-                        emoji: "📢",
+                        Icon: AlertCircle,
                         label: alert.notificationType,
                         bgColor: "#F9FAFB",
                         leftColor: "#6B7280",
@@ -1323,7 +2038,7 @@ export default function MainDashboard({ user, token, onLogout }) {
                                     gap: 5,
                                   }}
                                 >
-                                  <Text style={{ fontSize: 14 }}>{t.emoji}</Text>
+                                  <t.Icon size={13} color={t.tagText} strokeWidth={2.2} />
                                   <Text
                                     style={{
                                       fontWeight: "900",
@@ -1644,7 +2359,9 @@ export default function MainDashboard({ user, token, onLogout }) {
                     if (filtered.length === 0) {
                       return (
                         <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 20 }}>
-                          <Text style={{ fontSize: 32, marginBottom: 10 }}>📭</Text>
+                          <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: "#F1F5F9", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
+                            <Inbox size={28} color="#94A3B8" strokeWidth={1.8} />
+                          </View>
                           <Text style={{ fontWeight: "800", color: "#6B7280", fontSize: 13, textAlign: "center" }}>
                             No records found
                           </Text>
@@ -1760,7 +2477,7 @@ export default function MainDashboard({ user, token, onLogout }) {
                       );
                     }}
                   >
-                    <Text style={{ fontSize: 16, marginRight: 6 }}>📄</Text>
+                    <FileText size={16} color="#fff" strokeWidth={2} style={{ marginRight: 6 }} />
                     <Text style={{ color: "#fff", fontWeight: "700", fontSize: 13 }}>PDF Report</Text>
                   </TouchableOpacity>
 
@@ -1778,7 +2495,7 @@ export default function MainDashboard({ user, token, onLogout }) {
                     }}
                     onPress={() => setShowHistoryModal(false)}
                   >
-                    <Text style={{ fontSize: 16, marginRight: 6 }}>✖</Text>
+                    <X size={16} color="#334155" strokeWidth={2.2} style={{ marginRight: 6 }} />
                     <Text style={{ color: "#334155", fontWeight: "700", fontSize: 13 }}>Close</Text>
                   </TouchableOpacity>
                 </View>
@@ -1938,9 +2655,10 @@ export default function MainDashboard({ user, token, onLogout }) {
                           borderColor: "rgba(255,255,255,0.6)",
                         }}
                       >
-                        <Text style={{ color: "#fff", fontWeight: "700", fontSize: 13 }}>
-                          📁 Upload QR Image Instead
-                        </Text>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                          <Upload size={14} color="#fff" strokeWidth={2} />
+                          <Text style={{ color: "#fff", fontWeight: "700", fontSize: 13 }}>Upload QR Image</Text>
+                        </View>
                       </TouchableOpacity>
                     )}
 
@@ -2078,11 +2796,12 @@ export default function MainDashboard({ user, token, onLogout }) {
                     borderBottomColor: "#E2E8F0",
                   }}
                 >
-                  <Text
-                    style={{ fontSize: 10, fontWeight: "900", color: "#475569" }}
-                  >
-                    📊 Day-Wise Absence Log
-                  </Text>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <BarChart2 size={12} color="#7C3AED" strokeWidth={2.2} />
+                    <Text style={{ fontSize: 10, fontWeight: "900", color: "#475569" }}>
+                      Day-Wise Absence Log
+                    </Text>
+                  </View>
                 </View>
                 <View
                   style={{
@@ -2172,7 +2891,7 @@ export default function MainDashboard({ user, token, onLogout }) {
                     Alert.alert("Export", "Generating HoD Attendance Report PDF...")
                   }
                 >
-                  <Text style={{ fontSize: 18, marginBottom: 2 }}>📄</Text>
+                  <Download size={16} color="#7C3AED" strokeWidth={2} style={{ marginBottom: 4 }} />
                   <Text
                     style={{ fontSize: 10, fontWeight: "900", color: "#7C3AED" }}
                   >
@@ -2239,7 +2958,7 @@ export default function MainDashboard({ user, token, onLogout }) {
                 {deptSummary.absentList.map((s, i) => (
                   <View key={s.id || i} style={{ flexDirection: "row", alignItems: "center", backgroundColor: "white", padding: 12, marginBottom: 6, borderRadius: 10, borderWidth: 1, borderColor: "#f1f5f9" }}>
                     <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: "#FEF2F2", justifyContent: "center", alignItems: "center", marginRight: 10 }}>
-                      <Text style={{ fontSize: 14 }}>🚫</Text>
+                      <UserX size={15} color="#EF4444" strokeWidth={2.2} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 11, fontWeight: "800", color: "#1E293B" }}>
@@ -2315,7 +3034,10 @@ export default function MainDashboard({ user, token, onLogout }) {
 
                 {/* Personal Details Card */}
                 <View style={profileStyles.card}>
-                  <Text style={profileStyles.cardTitle}>📇 PERSONAL DETAILS</Text>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 14 }}>
+                    <User size={14} color="#2563EB" strokeWidth={2.2} />
+                    <Text style={[profileStyles.cardTitle, { marginBottom: 0 }]}>PERSONAL DETAILS</Text>
+                  </View>
                   <View style={profileStyles.row}>
                     <View style={profileStyles.col}>
                       <Text style={profileStyles.label}>ROLL NUMBER</Text>
@@ -2348,7 +3070,10 @@ export default function MainDashboard({ user, token, onLogout }) {
 
                 {/* Transit Subscription Card */}
                 <View style={profileStyles.card}>
-                  <Text style={profileStyles.cardTitle}>🚌 TRANSIT SUBSCRIPTION</Text>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 14 }}>
+                    <Bus size={14} color="#2563EB" strokeWidth={2.2} />
+                    <Text style={[profileStyles.cardTitle, { marginBottom: 0 }]}>TRANSIT SUBSCRIPTION</Text>
+                  </View>
                   <View
                     style={{
                       backgroundColor: "#F8FAFC",
@@ -2401,7 +3126,10 @@ export default function MainDashboard({ user, token, onLogout }) {
 
                 {/* Emergency / Parent Contact Card */}
                 <View style={profileStyles.card}>
-                  <Text style={profileStyles.cardTitle}>📞 EMERGENCY / PARENT CONTACT</Text>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 14 }}>
+                    <Phone size={14} color="#2563EB" strokeWidth={2.2} />
+                    <Text style={[profileStyles.cardTitle, { marginBottom: 0 }]}>EMERGENCY / PARENT CONTACT</Text>
+                  </View>
                   <View style={profileStyles.row}>
                     <View style={profileStyles.col}>
                       <Text style={profileStyles.label}>FATHER NAME</Text>
@@ -2549,28 +3277,43 @@ const styles = StyleSheet.create({
     width: "100%",
     alignItems: "center",
   },
+
   sqBtn: {
-    width: "48%",
-    backgroundColor: "white",
-    borderRadius: 15,
-    padding: 15,
-    marginBottom: 15,
-    alignItems: "center",
-    borderWidth: 1.5,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    padding: 18,
+    marginBottom: 8,
+
+    height: 135,
+    minHeight: 135,
+
+    borderWidth: 1,
     borderColor: "#F1F5F9",
+
     elevation: 3,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+
+    // IMPORTANT
+    justifyContent: "flex-start",
+  },
+
+  sqBtnText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#17213D",
+    textAlign: "left",
+    lineHeight: 16,
   },
   sqBtnIcon: { fontSize: 28, marginBottom: 8 },
-  sqBtnText: {
-    fontSize: 11,
-    fontWeight: "800",
-    color: "#475569",
-    textAlign: "center",
-  },
+  // sqBtnText: {
+  //   fontSize: 11,
+  //   fontWeight: "800",
+  //   color: "#475569",
+  //   textAlign: "center",
+  // },
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",

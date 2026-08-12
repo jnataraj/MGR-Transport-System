@@ -46,8 +46,6 @@ export function AuthProvider({ children }) {
   }, []);
 
   const login = useCallback(async (email, password) => {
-    // Normalize email: trim whitespace and lowercase so the lookup is
-    // consistent regardless of how the user typed it (e.g. "Driver@CTMS.com")
     const normalizedEmail = (email || "").trim().toLowerCase();
     const data = await apiRequest("/api/auth/login", {
       method: "POST",
@@ -69,6 +67,7 @@ export function AuthProvider({ children }) {
         return data.user;
       }
     } catch (err) {
+      if (err?.status === 401) return null;
       console.error("Failed to refresh profile:", err);
     }
     return null;

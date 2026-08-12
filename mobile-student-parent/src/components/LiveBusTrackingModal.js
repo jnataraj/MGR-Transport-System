@@ -10,6 +10,7 @@ import {
   Linking,
   SafeAreaView,
 } from "react-native";
+import { X, Bus, RotateCw, AlertTriangle, Crosshair } from "lucide-react-native";
 import * as Location from "expo-location";
 import { API_BASE } from "../api/client";
 
@@ -230,7 +231,8 @@ export default function LiveBusTrackingModal({
             <View style={[styles.onlineDot, { backgroundColor: busOnline ? "#34D399" : "#94A3B8" }]} />
             <Text style={styles.onlineLabel}>{busOnline ? "LIVE" : "OFFLINE"}</Text>
             <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-              <Text style={styles.closeBtnText}>✕</Text>
+              {/* <Text style={styles.closeBtnText}>✕</Text> */}
+              <X size={16} color="#FFF" strokeWidth={2.5} />
             </TouchableOpacity>
           </View>
         </View>

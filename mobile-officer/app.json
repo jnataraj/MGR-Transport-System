@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "CTMS Officer App",
-    "slug": "mobile-officer",
+    "slug": "ctms-officer-app",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -20,13 +20,19 @@
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
         "CAMERA"
-      ]
+      ],
+      "package": "com.natarajj25steam.ctmsofficerapp"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "expo-sharing"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "ee48b74a-df2c-4eca-8a1a-65beedcb75bb"
+      }
+    }
   }
 }

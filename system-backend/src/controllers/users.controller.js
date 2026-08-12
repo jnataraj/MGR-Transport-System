@@ -45,18 +45,130 @@ const formatUser = (user) => {
 
   const vehicleList =
     user.role?.toLowerCase() === "student"
-      ? (user.studentAssignments || []).map((a) => a.vehicle)
+      ? (user.studentAssignments || [])
+        .map((a) => a.vehicle)
+        .filter(Boolean)
       : (user.vehicles || []);
 
   return {
     ...rest,
+
     vehicle:
       vehicleList.length > 0
         ? vehicleList.map((v) => v.number).join(", ")
         : "Not Assigned",
+
     vehicleIds: vehicleList.map((v) => v.id),
+
     vehicles: vehicleList,
+
+    // Driver information for the assigned/current vehicle
+    driverName:
+      vehicleList.find((v) => v.driver?.name)?.driver?.name || null,
+
+    driverId:
+      vehicleList.find((v) => v.driver?.id)?.driver?.id || null,
+
+    drivers: vehicleList
+      .filter((v) => v.driver)
+      .map((v) => ({
+        vehicleId: v.id,
+        vehicleNumber: v.number,
+        driverId: v.driver.id,
+        driverName: v.driver.name,
+        phone: v.driver.phone || null,
+      })),
   };
+};
+
+const attachDriverDetails = async (users) => {
+  // Get all vehicles from students/drivers
+  const allVehicles = users.flatMap((user) => {
+    if (user.role?.toLowerCase() === "student") {
+      return (user.studentAssignments || [])
+        .map((a) => a.vehicle)
+        .filter(Boolean);
+    }
+
+    return user.vehicles || [];
+  });
+
+  // Get unique driver IDs
+  const driverIds = [
+    ...new Set(
+      allVehicles
+        .map((vehicle) => vehicle?.driverId)
+        .filter(Boolean)
+    ),
+  ];
+
+  if (driverIds.length === 0) {
+    return users;
+  }
+
+  // Get actual driver users
+  const drivers = await prisma.user.findMany({
+    where: {
+      id: { in: driverIds },
+    },
+    select: {
+      id: true,
+      name: true,
+      phone: true,
+    },
+  });
+
+  const driverMap = new Map(
+    drivers.map((driver) => [driver.id, driver])
+  );
+
+  // Attach driver details to every vehicle
+  return users.map((user) => {
+    const vehicleList =
+      user.role?.toLowerCase() === "student"
+        ? (user.studentAssignments || [])
+          .map((a) => a.vehicle)
+          .filter(Boolean)
+        : (user.vehicles || []);
+
+    const updatedVehicles = vehicleList.map((vehicle) => ({
+      ...vehicle,
+      driver: vehicle.driverId
+        ? driverMap.get(vehicle.driverId) || null
+        : null,
+    }));
+
+    return {
+      ...user,
+
+      vehicles: updatedVehicles,
+
+      studentAssignments:
+        user.role?.toLowerCase() === "student"
+          ? (user.studentAssignments || []).map((assignment) => ({
+            ...assignment,
+            vehicle:
+              updatedVehicles.find(
+                (v) => v.id === assignment.vehicle?.id
+              ) || assignment.vehicle,
+          }))
+          : user.studentAssignments,
+
+      driverName:
+        updatedVehicles.find((v) => v.driver?.name)?.driver?.name ||
+        null,
+
+      drivers: updatedVehicles
+        .filter((v) => v.driver)
+        .map((v) => ({
+          vehicleId: v.id,
+          vehicleNumber: v.number,
+          driverId: v.driver.id,
+          driverName: v.driver.name,
+          phone: v.driver.phone || null,
+        })),
+    };
+  });
 };
 
 // Assigns userId to exactly the vehicles in vehicleIds (adds new links, removes any no longer selected)
@@ -98,18 +210,34 @@ const getUsers = async (req, res) => {
   try {
     const { role } = req.query;
     const where = role ? { role: { equals: role, mode: "insensitive" } } : {};
-    // const users = await prisma.user.findMany({
-    //   where,
-    //   // include: { assignedVehicle: true },
-    //   include: { vehicles: true }
-    // });
     const users = await prisma.user.findMany({
       where,
       include: {
-        vehicles: true, // Driver relation
+        vehicles: {
+          include: {
+            driver: {
+              select: {
+                id: true,
+                name: true,
+                phone: true,
+              },
+            },
+          },
+        },
+
         studentAssignments: {
           include: {
-            vehicle: true,
+            vehicle: {
+              include: {
+                driver: {
+                  select: {
+                    id: true,
+                    name: true,
+                    phone: true,
+                  },
+                },
+              },
+            },
           },
         },
       },
@@ -124,16 +252,51 @@ const getUsers = async (req, res) => {
 const getUser = async (req, res) => {
   try {
     const { id } = req.params;
+
     const user = await prisma.user.findUnique({
       where: { id },
-      // include: { assignedVehicle: true },
-      include: { vehicles: true }
+      include: {
+        vehicles: {
+          include: {
+            driver: {
+              select: {
+                id: true,
+                name: true,
+                phone: true,
+              },
+            },
+          },
+        },
+        studentAssignments: {
+          include: {
+            vehicle: {
+              include: {
+                driver: {
+                  select: {
+                    id: true,
+                    name: true,
+                    phone: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
     });
-    if (!user) return res.status(404).json({ error: "User not found" });
+
+    if (!user) {
+      return res.status(404).json({
+        error: "User not found",
+      });
+    }
+
     res.json(formatUser(user));
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Failed to fetch user" });
+    res.status(500).json({
+      error: "Failed to fetch user",
+    });
   }
 };
 
