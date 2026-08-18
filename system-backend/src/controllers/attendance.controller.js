@@ -620,22 +620,58 @@ exports.getBusLiveLocation = async (req, res) => {
     let loc = getVehicleLocation(vehicleId);
     let online = isVehicleOnline(vehicleId);
 
-    if (!loc) {
+    // Resolve vehicle record (needed to find the driver)
+    let vehicleRecord = await prisma.vehicle.findFirst({
+      where: { OR: [{ id: vehicleId }, { number: vehicleId }] },
+      select: { id: true, number: true, driverId: true, driver: { select: { id: true, status: true } } },
+    });
+
+    if (!loc && vehicleRecord) {
       // Resolve: maybe the client sent the vehicle number, store has the UUID (or vice-versa)
-      const vehicleRecord = await prisma.vehicle.findFirst({
-        where: { OR: [{ id: vehicleId }, { number: vehicleId }] },
-        select: { id: true, number: true },
+      const altKey = vehicleRecord.id === vehicleId ? vehicleRecord.number : vehicleRecord.id;
+      loc = getVehicleLocation(altKey) || null;
+      online = isVehicleOnline(altKey);
+    }
+
+    // ── Driver status checks ───────────────────────────────────────────────
+    // driverActive: driver account is NOT suspended or inactive.
+    //   Drivers have a dynamic status toggled between "Offline" ↔ "Active"
+    //   (capital A) by QR scan — they are "active" as long as they are not
+    //   explicitly suspended or set to inactive by an admin.
+    // driverOnDuty: driver performed a STARTED scan today (most recent scan).
+    let driverActive = false;
+    let driverOnDuty = false;
+
+    const driverId = vehicleRecord?.driver?.id || vehicleRecord?.driverId || null;
+    if (driverId) {
+      // Fetch the driver's latest status fresh from DB (vehicleRecord.driver may be stale)
+      const driverUser = await prisma.user.findUnique({
+        where: { id: driverId },
+        select: { status: true },
       });
-      if (vehicleRecord) {
-        const altKey = vehicleRecord.id === vehicleId ? vehicleRecord.number : vehicleRecord.id;
-        loc = getVehicleLocation(altKey) || null;
-        online = isVehicleOnline(altKey);
-      }
+      // Active = account is NOT suspended or inactive
+      const driverStatus = (driverUser?.status || "").toLowerCase();
+      driverActive = driverStatus !== "inactive" && driverStatus !== "suspended";
+
+      // OnDuty: most-recent driver_scan today must be stage=STARTED
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+      const latestScan = await prisma.attendance.findFirst({
+        where: {
+          userId: driverId,
+          type: "driver_scan",
+          scannedAt: { gte: startOfToday },
+        },
+        orderBy: { scannedAt: "desc" },
+      });
+      driverOnDuty = latestScan?.stage === "STARTED";
     }
 
     return res.json({
       success: true,
       online,
+      driverActive,
+      driverOnDuty,
       location: loc
         ? {
           latitude: loc.latitude,

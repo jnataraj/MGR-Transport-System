@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, Component } from "react";
 import {
   Modal,
   View,
@@ -10,20 +10,66 @@ import {
   Linking,
   SafeAreaView,
 } from "react-native";
-import { X, Bus, RotateCw, AlertTriangle, Crosshair } from "lucide-react-native";
+import { X, Bus, ExternalLink, RefreshCw } from "lucide-react-native";
 import * as Location from "expo-location";
 import { API_BASE } from "../api/client";
 
-let MapView, Marker, PROVIDER_GOOGLE;
+// Safely resolve react-native-maps
+let MapView = null;
+let Marker = null;
+let PROVIDER_GOOGLE = undefined;
+
 if (Platform.OS !== "web") {
-  const Maps = require("react-native-maps");
-  MapView = Maps.default;
-  Marker = Maps.Marker;
-  PROVIDER_GOOGLE = Maps.PROVIDER_GOOGLE;
+  try {
+    const Maps = require("react-native-maps");
+    MapView = Maps.default || Maps;
+    Marker = Maps.Marker || (Maps.default && Maps.default.Marker);
+    PROVIDER_GOOGLE = Maps.PROVIDER_GOOGLE || (Maps.default && Maps.default.PROVIDER_GOOGLE);
+  } catch (err) {
+    console.warn("[LiveBusTrackingModal] react-native-maps not available:", err);
+  }
 }
 
 /** How long (ms) without a GPS ping before we show the bus as offline */
 const OFFLINE_THRESHOLD_MS = 45_000;
+
+// Safe coordinate parser
+const parseCoord = (val) => {
+  if (val === null || val === undefined) return null;
+  const num = typeof val === "number" ? val : parseFloat(val);
+  return Number.isFinite(num) ? num : null;
+};
+
+// Error Boundary to prevent any native map crash from closing the app
+class MapErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.warn("[LiveBusTrackingModal] Map crashed:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback ? (
+        this.props.fallback(this.state.error, () => this.setState({ hasError: false, error: null }))
+      ) : (
+        <View style={styles.centreBox}>
+          <Text style={{ fontSize: 42, marginBottom: 12 }}>🗺️</Text>
+          <Text style={styles.errorTitle}>Map Display Unavailable</Text>
+          <Text style={styles.errorBody}>Could not render the interactive map on this device.</Text>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 export default function LiveBusTrackingModal({
   visible,
@@ -39,10 +85,13 @@ export default function LiveBusTrackingModal({
   const [busLocation, setBusLocation] = useState(null); // { latitude, longitude, updatedAt }
   const [myLocation, setMyLocation] = useState(null);   // student's own GPS
   const [error, setError] = useState(null);
+  // ── Gating conditions ─────────────────────────────────────────────────────
+  const [driverActive, setDriverActive] = useState(null);  // null = not yet fetched
+  const [driverOnDuty, setDriverOnDuty] = useState(false); // true only when STARTED scan today
   const mapRef = useRef(null);
   const offlineTimerRef = useRef(null);
   const assignedVehicleId = user?.vehicleId || user?.vehicle || null;
-  const vehicleNumber = user?.vehicle || user?.vehicleId || "—";
+  const vehicleNumber = user?.vehicle || user?.vehicleId || null;
   const routeLabel = user?.route || "—";
 
   const authHeaders = {
@@ -53,7 +102,7 @@ export default function LiveBusTrackingModal({
   // ── Fetch initial snapshot from REST ──────────────────────────────────────
   const fetchInitialLocation = useCallback(async () => {
     if (!assignedVehicleId) {
-      setError("No bus assigned to your account.");
+      // Student not assigned to any bus — no need to call the API
       return;
     }
     setLoading(true);
@@ -65,13 +114,23 @@ export default function LiveBusTrackingModal({
       );
       const data = await res.json();
       if (data.success) {
-        setBusOnline(data.online);
-        if (data.location) {
-          setBusLocation({
-            latitude: data.location.latitude,
-            longitude: data.location.longitude,
-            updatedAt: new Date(data.location.updatedAt),
-          });
+        setBusOnline(!!data.online);
+        // Store driver gating flags from the enriched response
+        setDriverActive(data.driverActive ?? null);
+        setDriverOnDuty(!!data.driverOnDuty);
+        // Only store location when driver is active+onduty and coords are valid
+        if (data.driverActive && data.driverOnDuty && data.location) {
+          const lat = parseCoord(data.location.latitude);
+          const lng = parseCoord(data.location.longitude);
+          if (lat !== null && lng !== null) {
+            setBusLocation({
+              latitude: lat,
+              longitude: lng,
+              updatedAt: new Date(data.location.updatedAt || Date.now()),
+            });
+          }
+        } else {
+          setBusLocation(null);
         }
       }
     } catch (err) {
@@ -90,10 +149,13 @@ export default function LiveBusTrackingModal({
         const loc = await Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.Balanced,
         });
-        setMyLocation({
-          latitude: loc.coords.latitude,
-          longitude: loc.coords.longitude,
-        });
+        if (loc?.coords) {
+          const lat = parseCoord(loc.coords.latitude);
+          const lng = parseCoord(loc.coords.longitude);
+          if (lat !== null && lng !== null) {
+            setMyLocation({ latitude: lat, longitude: lng });
+          }
+        }
       }
     } catch {
       // GPS unavailable — no "my location" dot shown, that's fine
@@ -103,15 +165,23 @@ export default function LiveBusTrackingModal({
   // ── Auto-animate map to bus position ──────────────────────────────────────
   const animateToBus = useCallback((coords) => {
     if (mapRef.current && coords && Platform.OS !== "web") {
-      mapRef.current.animateToRegion(
-        {
-          latitude: coords.latitude,
-          longitude: coords.longitude,
-          latitudeDelta: 0.005,
-          longitudeDelta: 0.005,
-        },
-        600,
-      );
+      const lat = parseCoord(coords.latitude);
+      const lng = parseCoord(coords.longitude);
+      if (lat !== null && lng !== null && mapRef.current.animateToRegion) {
+        try {
+          mapRef.current.animateToRegion(
+            {
+              latitude: lat,
+              longitude: lng,
+              latitudeDelta: 0.005,
+              longitudeDelta: 0.005,
+            },
+            600,
+          );
+        } catch (err) {
+          console.warn("[LiveBusTrackingModal] animateToRegion error:", err);
+        }
+      }
     }
   }, []);
 
@@ -130,6 +200,8 @@ export default function LiveBusTrackingModal({
     setMyLocation(null);
     setBusOnline(false);
     setError(null);
+    setDriverActive(null);
+    setDriverOnDuty(false);
     fetchInitialLocation();
     fetchMyLocation();
 
@@ -152,9 +224,15 @@ export default function LiveBusTrackingModal({
         data.vehicleId === user?.vehicleId;
       if (!isMyBus) return;
 
+      const lat = parseCoord(data.latitude ?? data.lat);
+      const lng = parseCoord(data.longitude ?? data.lng);
+      if (lat === null || lng === null) return;
+
+      // Socket update means driver IS on duty and sending live GPS
+      setDriverOnDuty(true);
       const newCoords = {
-        latitude: data.latitude ?? data.lat,
-        longitude: data.longitude ?? data.lng,
+        latitude: lat,
+        longitude: lng,
         updatedAt: new Date(),
       };
       setBusLocation(newCoords);
@@ -199,45 +277,80 @@ export default function LiveBusTrackingModal({
   // ── Render guard: HoD should never see this ───────────────────────────────
   if (userRole === "hod") return null;
 
-  // ── Initial region for map ────────────────────────────────────────────────
-  const initialRegion = busLocation
+  // ── Four-condition gating ─────────────────────────────────────────────────
+  // Condition 1: student must have an assigned bus/vehicle
+  const isAssigned = !!assignedVehicleId;
+  // Condition 2: driver account must be Active (null = still loading)
+  const isDriverActive = driverActive === true;
+  // Condition 3: driver must be OnDuty (STARTED scan today)
+  const isDriverOnDuty = driverOnDuty;
+  // Condition 4: valid live GPS coordinates
+  const busLat = parseCoord(busLocation?.latitude);
+  const busLng = parseCoord(busLocation?.longitude);
+  const hasValidBusCoords = busLat !== null && busLng !== null;
+
+  // Only build a region when we have real coordinates — no hardcoded fallback
+  const initialRegion = hasValidBusCoords
     ? {
-      latitude: busLocation.latitude,
-      longitude: busLocation.longitude,
+      latitude: busLat,
+      longitude: busLng,
       latitudeDelta: 0.005,
       longitudeDelta: 0.005,
     }
-    : {
-      // Default centre — overridden once GPS data arrives
-      latitude: 11.0168,
-      longitude: 76.9558,
-      latitudeDelta: 0.05,
-      longitudeDelta: 0.05,
-    };
+    : null;
+
+  // ── Native map error boundary fallback ────────────────────────────────────
+  const renderNativeFallback = (customErr, retry) => (
+    <View style={styles.centreBox}>
+      <Text style={{ fontSize: 42, marginBottom: 12 }}>🗺️</Text>
+      <Text style={styles.errorTitle}>Map Unavailable</Text>
+      <Text style={styles.errorBody}>Could not display the interactive map on this device.</Text>
+      <TouchableOpacity
+        style={styles.retryBtn}
+        onPress={() => { if (retry) retry(); }}
+        activeOpacity={0.8}
+      >
+        <Text style={styles.retryBtnText}>↻ Try Again</Text>
+      </TouchableOpacity>
+    </View>
+  );
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <SafeAreaView style={styles.root}>
-
         {/* ── Header ── */}
         <View style={styles.header}>
           <View style={{ flex: 1 }}>
             <Text style={styles.headerSub}>LIVE BUS TRACKING</Text>
             <Text style={styles.headerTitle} numberOfLines={1}>
-              {vehicleNumber} · {routeLabel}
+              {vehicleNumber ? `${vehicleNumber} · ${routeLabel}` : "My Bus"}
             </Text>
           </View>
           <View style={styles.headerRight}>
-            <View style={[styles.onlineDot, { backgroundColor: busOnline ? "#34D399" : "#94A3B8" }]} />
-            <Text style={styles.onlineLabel}>{busOnline ? "LIVE" : "OFFLINE"}</Text>
+            {/* Only show live/offline dot when all conditions pass */}
+            {isAssigned && isDriverActive && isDriverOnDuty && (
+              <>
+                <View style={[styles.onlineDot, { backgroundColor: busOnline ? "#34D399" : "#94A3B8" }]} />
+                <Text style={styles.onlineLabel}>{busOnline ? "LIVE" : "OFFLINE"}</Text>
+              </>
+            )}
+            {/* Open in Maps button only when we have valid GPS */}
+            {hasValidBusCoords && (
+              <TouchableOpacity
+                onPress={openInGoogleMaps}
+                style={[styles.closeBtn, { marginRight: 4, backgroundColor: "rgba(255,255,255,0.2)" }]}
+                accessibilityLabel="Open in Google Maps"
+              >
+                <ExternalLink size={15} color="#FFF" strokeWidth={2.2} />
+              </TouchableOpacity>
+            )}
             <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-              {/* <Text style={styles.closeBtnText}>✕</Text> */}
               <X size={16} color="#FFF" strokeWidth={2.5} />
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* ── Body ── */}
+        {/* ── Body: four-condition gated rendering ── */}
         {loading ? (
           <View style={styles.centreBox}>
             <ActivityIndicator color="#2563EB" size="large" />
@@ -245,6 +358,7 @@ export default function LiveBusTrackingModal({
           </View>
 
         ) : error ? (
+          /* ── Network / server error ── */
           <View style={styles.centreBox}>
             <Text style={{ fontSize: 42, marginBottom: 12 }}>🚌</Text>
             <Text style={styles.errorTitle}>Unable to Load Map</Text>
@@ -254,40 +368,69 @@ export default function LiveBusTrackingModal({
             </TouchableOpacity>
           </View>
 
-        ) : !busOnline && !busLocation ? (
-          /* ── Driver hasn't started GPS yet ── */
+        ) : !isAssigned ? (
+          /* ── Condition 1 failed: student has no bus assigned ── */
           <View style={styles.centreBox}>
-            <Text style={{ fontSize: 56, marginBottom: 16 }}>🚌</Text>
-            <Text style={styles.offlineTitle}>Bus Not Yet Online</Text>
+            <Text style={{ fontSize: 52, marginBottom: 16 }}>🚌</Text>
+            <Text style={styles.offlineTitle}>No Bus Assigned</Text>
             <Text style={styles.offlineBody}>
-              Live tracking will appear here once the driver starts their route and enables GPS sharing.
+              You have not been assigned to a bus. Please contact your transport administrator.
+            </Text>
+          </View>
+
+        ) : !isDriverActive ? (
+          /* ── Condition 2 failed: driver account is not Active ── */
+          <View style={styles.centreBox}>
+            <Text style={{ fontSize: 52, marginBottom: 16 }}>🚫</Text>
+            <Text style={styles.offlineTitle}>Bus Tracking Unavailable</Text>
+            <Text style={styles.offlineBody}>
+              Bus tracking is currently unavailable.
             </Text>
             <TouchableOpacity style={styles.retryBtn} onPress={fetchInitialLocation}>
               <Text style={styles.retryBtnText}>↻  Check Again</Text>
             </TouchableOpacity>
           </View>
 
-        ) : Platform.OS === "web" ? (
-          /* ── Web: full embedded live map, no card/button clutter ── */
-          <View style={{ flex: 1 }}>
-            {busLocation ? (
-              <iframe
-                key={`${busLocation.latitude}-${busLocation.longitude}`}
-                title="bus-live-map"
-                width="100%"
-                height="100%"
-                style={{ border: 0, display: "block" }}
-                loading="lazy"
-                src={`https://maps.google.com/maps?q=${busLocation.latitude},${busLocation.longitude}&z=16&output=embed`}
-              />
-            ) : (
-              <View style={styles.centreBox}>
-                <Text style={styles.offlineBody}>No position data available yet.</Text>
-              </View>
-            )}
+        ) : !isDriverOnDuty ? (
+          /* ── Condition 3 failed: driver hasn't started their duty today ── */
+          <View style={styles.centreBox}>
+            <Text style={{ fontSize: 52, marginBottom: 16 }}>⏳</Text>
+            <Text style={styles.offlineTitle}>Bus Tracking Unavailable</Text>
+            <Text style={styles.offlineBody}>
+              Bus tracking is currently unavailable.
+            </Text>
+            <TouchableOpacity style={styles.retryBtn} onPress={fetchInitialLocation}>
+              <Text style={styles.retryBtnText}>↻  Check Again</Text>
+            </TouchableOpacity>
+          </View>
 
-            {/* Small overlay banner if driver GPS is stale */}
-            {!busOnline && busLocation && (
+        ) : !hasValidBusCoords ? (
+          /* ── Condition 4 failed: driver is on duty but no valid GPS yet ── */
+          <View style={styles.centreBox}>
+            <Text style={{ fontSize: 52, marginBottom: 16 }}>📡</Text>
+            <Text style={styles.offlineTitle}>Bus Location Unavailable</Text>
+            <Text style={styles.offlineBody}>
+              Bus location is currently unavailable. The driver's GPS is being acquired — please try again shortly.
+            </Text>
+            <TouchableOpacity style={styles.retryBtn} onPress={fetchInitialLocation}>
+              <Text style={styles.retryBtnText}>↻  Refresh</Text>
+            </TouchableOpacity>
+          </View>
+
+        ) : Platform.OS === "web" ? (
+          /* ── All conditions met — Web: embedded Google Maps iframe ── */
+          <View style={{ flex: 1 }}>
+            <iframe
+              key={`${busLat}-${busLng}`}
+              title="bus-live-map"
+              width="100%"
+              height="100%"
+              style={{ border: 0, display: "block" }}
+              loading="lazy"
+              src={`https://maps.google.com/maps?q=${busLat},${busLng}&z=16&output=embed`}
+            />
+            {/* Stale GPS overlay */}
+            {!busOnline && (
               <View
                 style={{
                   position: "absolute",
@@ -302,91 +445,108 @@ export default function LiveBusTrackingModal({
                 }}
               >
                 <Text style={{ color: "#713F12", fontSize: 12, fontWeight: "700", textAlign: "center" }}>
-                  ⚠️ Driver GPS offline — showing last known position
+                  ⚠️ Driver GPS signal weak — showing last known position
                 </Text>
               </View>
             )}
           </View>
 
+        ) : !MapView || !Marker ? (
+          /* ── Native map library not available ── */
+          renderNativeFallback()
         ) : (
-          /* ── Native Map (iOS / Android) ── */
-          <View style={{ flex: 1 }}>
-            <MapView
-              ref={mapRef}
-              style={styles.map}
-              provider={PROVIDER_GOOGLE}
-              initialRegion={initialRegion}
-              showsUserLocation={false}
-              showsMyLocationButton={false}
-              showsCompass
-              showsScale
-            >
-              {/* Bus marker */}
-              {busLocation && (
-                <Marker
-                  coordinate={{
-                    latitude: busLocation.latitude,
-                    longitude: busLocation.longitude,
-                  }}
-                  title={`Bus ${vehicleNumber}`}
-                  description={`Route: ${routeLabel} · ${busOnline ? "Live" : "Last known"}`}
-                  anchor={{ x: 0.5, y: 0.5 }}
-                >
-                  <View style={styles.busMarker}>
-                    <Text style={styles.busMarkerEmoji}>🚌</Text>
-                  </View>
-                </Marker>
-              )}
+          /* ── All conditions met — Native Map (iOS / Android) wrapped in ErrorBoundary ── */
+          <MapErrorBoundary fallback={(err, retry) => renderNativeFallback(err, retry)}>
+            <View style={{ flex: 1 }}>
+              <MapView
+                ref={mapRef}
+                style={styles.map}
+                provider={PROVIDER_GOOGLE}
+                initialRegion={initialRegion}
+                showsUserLocation={false}
+                showsMyLocationButton={false}
+                showsCompass
+                showsScale
+              >
+                {/* Bus marker */}
+                {hasValidBusCoords && (
+                  <Marker
+                    coordinate={{
+                      latitude: busLat,
+                      longitude: busLng,
+                    }}
+                    title={`Bus ${vehicleNumber}`}
+                    description={`Route: ${routeLabel} · ${busOnline ? "Live" : "Last known"}`}
+                    anchor={{ x: 0.5, y: 0.5 }}
+                    tracksViewChanges={false}
+                  >
+                    <View style={styles.busMarker}>
+                      <Text style={styles.busMarkerEmoji}>🚌</Text>
+                    </View>
+                  </Marker>
+                )}
 
-              {/* Student's own location dot */}
-              {myLocation && (
-                <Marker
-                  coordinate={myLocation}
-                  title="You"
-                  description="Your current location"
-                  anchor={{ x: 0.5, y: 0.5 }}
-                >
-                  <View style={styles.myMarker}>
-                    <View style={styles.myMarkerDot} />
-                  </View>
-                </Marker>
-              )}
-            </MapView>
+                {/* Student's own location dot */}
+                {myLocation && parseCoord(myLocation.latitude) !== null && parseCoord(myLocation.longitude) !== null && (
+                  <Marker
+                    coordinate={{
+                      latitude: parseCoord(myLocation.latitude),
+                      longitude: parseCoord(myLocation.longitude),
+                    }}
+                    title="You"
+                    description="Your current location"
+                    anchor={{ x: 0.5, y: 0.5 }}
+                    tracksViewChanges={false}
+                  >
+                    <View style={styles.myMarker}>
+                      <View style={styles.myMarkerDot} />
+                    </View>
+                  </Marker>
+                )}
+              </MapView>
 
-            {/* ── Info strip overlaid at bottom ── */}
-            <View style={styles.infoStrip}>
-              {!busOnline && busLocation && (
-                <View style={styles.offlineBanner}>
-                  <Text style={styles.offlineBannerText}>
-                    ⚠️  Driver GPS offline — showing last known position
-                  </Text>
+              {/* ── Info strip overlaid at bottom ── */}
+              <View style={styles.infoStrip}>
+                {!busOnline && busLocation && (
+                  <View style={styles.offlineBanner}>
+                    <Text style={styles.offlineBannerText}>
+                      ⚠️  Driver GPS offline — showing last known position
+                    </Text>
+                  </View>
+                )}
+                <View style={styles.infoRow}>
+                  <View style={styles.infoItem}>
+                    <Text style={styles.infoLabel}>BUS</Text>
+                    <Text style={styles.infoValue}>{vehicleNumber}</Text>
+                  </View>
+                  <View style={styles.infoItem}>
+                    <Text style={styles.infoLabel}>ROUTE</Text>
+                    <Text style={styles.infoValue} numberOfLines={1}>{routeLabel}</Text>
+                  </View>
+                  <View style={styles.infoItem}>
+                    <Text style={styles.infoLabel}>UPDATED</Text>
+                    <Text style={styles.infoValue}>
+                      {busLocation ? formatTime(busLocation.updatedAt) : "—"}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.centreMapBtn}
+                    onPress={() => busLocation && animateToBus(busLocation)}
+                    accessibilityLabel="Centre map on bus"
+                  >
+                    <Text style={styles.centreMapBtnText}>🎯</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.centreMapBtn, { backgroundColor: "#2563EB", borderColor: "#1D4ED8" }]}
+                    onPress={openInGoogleMaps}
+                    accessibilityLabel="Open in Google Maps"
+                  >
+                    <ExternalLink size={18} color="#FFFFFF" strokeWidth={2.5} />
+                  </TouchableOpacity>
                 </View>
-              )}
-              <View style={styles.infoRow}>
-                <View style={styles.infoItem}>
-                  <Text style={styles.infoLabel}>BUS</Text>
-                  <Text style={styles.infoValue}>{vehicleNumber}</Text>
-                </View>
-                <View style={styles.infoItem}>
-                  <Text style={styles.infoLabel}>ROUTE</Text>
-                  <Text style={styles.infoValue} numberOfLines={1}>{routeLabel}</Text>
-                </View>
-                <View style={styles.infoItem}>
-                  <Text style={styles.infoLabel}>UPDATED</Text>
-                  <Text style={styles.infoValue}>
-                    {busLocation ? formatTime(busLocation.updatedAt) : "—"}
-                  </Text>
-                </View>
-                <TouchableOpacity
-                  style={styles.centreMapBtn}
-                  onPress={() => busLocation && animateToBus(busLocation)}
-                  accessibilityLabel="Centre map on bus"
-                >
-                  <Text style={styles.centreMapBtnText}>🎯</Text>
-                </TouchableOpacity>
               </View>
             </View>
-          </View>
+          </MapErrorBoundary>
         )}
       </SafeAreaView>
     </Modal>
