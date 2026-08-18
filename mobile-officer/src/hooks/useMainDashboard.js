@@ -409,31 +409,68 @@ export function useMainDashboard({ user, token, onLogout }) {
 
   useEffect(() => {
     let locationWatcher = null;
+    let heartbeatInterval = null;
 
     const shouldTrack = caps.canTrackGPS && qrStatus === "STARTED" && gpsEnabled;
 
     if (shouldTrack) {
+      const emitLocation = (coords) => {
+        if (!coords) return;
+        socketRef.current?.emit("driverLocationUpdate", {
+          vehicleId: userVehicle,
+          driverId: userId,
+          role: role || "driver",
+          lat: coords.latitude,
+          lng: coords.longitude,
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+          timestamp: new Date().toISOString(),
+        });
+      };
+
       (async () => {
-        locationWatcher = await Location.watchPositionAsync(
-          { accuracy: Location.Accuracy.High, distanceInterval: 10 },
-          (loc) => {
-            socketRef.current?.emit("driverLocationUpdate", {
-              vehicleId: userVehicle,
-              lat: loc.coords.latitude,
-              lng: loc.coords.longitude,
-              timestamp: new Date().toISOString(),
-            });
-          },
-        );
+        // 1. Immediate position fix
+        try {
+          const initialLoc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          if (initialLoc?.coords) {
+            emitLocation(initialLoc.coords);
+          }
+        } catch (e) {
+          console.log("Initial GPS fix error:", e.message);
+        }
+
+        // 2. Continuous position watcher (every 10m)
+        try {
+          locationWatcher = await Location.watchPositionAsync(
+            { accuracy: Location.Accuracy.High, distanceInterval: 10 },
+            (loc) => emitLocation(loc.coords),
+          );
+        } catch (e) {
+          console.log("watchPositionAsync error:", e.message);
+        }
+
+        // 3. Periodic heartbeat every 15s so vehicle stays online even when stationary
+        heartbeatInterval = setInterval(async () => {
+          try {
+            const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }).catch(() => null);
+            if (loc?.coords) {
+              emitLocation(loc.coords);
+            }
+          } catch {}
+        }, 15000);
       })();
     } else if (caps.canTrackGPS) {
       socketRef.current?.emit("driverLocationStopped", {
         vehicleId: userVehicle,
+        driverId: userId,
       });
     }
 
-    return () => locationWatcher?.remove();
-  }, [qrStatus, gpsEnabled, role]);
+    return () => {
+      locationWatcher?.remove();
+      if (heartbeatInterval) clearInterval(heartbeatInterval);
+    };
+  }, [qrStatus, gpsEnabled, role, caps.canTrackGPS, userVehicle, userId]);
 
   useEffect(() => {
     (async () => {

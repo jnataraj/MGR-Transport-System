@@ -4,14 +4,18 @@ const prisma = require("../prisma/prisma");
 const ADMIN_ROLE = "deptadmin";
 
 const formatAdmin = (user) => {
-    const { password, ...rest } = user;
+    const { password, plainPassword, ...rest } = user;
     let permissions = [];
     try {
         permissions = JSON.parse(user.permissions || "[]");
     } catch {
         permissions = [];
     }
-    return { ...rest, permissions };
+    return {
+        ...rest,
+        password: plainPassword || "",
+        permissions,
+    };
 };
 
 // GET /api/admins
@@ -72,6 +76,7 @@ exports.createAdmin = async (req, res) => {
                 name,
                 email,
                 password: hashedPassword,
+                plainPassword: password,
                 role: ADMIN_ROLE,
                 phone: phone || null,
                 employeeId: employeeId || null,
@@ -135,6 +140,7 @@ exports.updateAdmin = async (req, res) => {
                 ...(loginId !== undefined && { loginId }),
                 ...(status !== undefined && { status }),
                 ...(hashedPassword !== undefined && { password: hashedPassword }),
+                ...(password !== undefined && password !== "" && { plainPassword: password }),
             },
         });
 

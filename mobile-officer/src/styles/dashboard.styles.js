@@ -62,6 +62,18 @@ export const styles = StyleSheet.create({
   },
   bellBadgeText: { color: "#fff", fontSize: 9, fontWeight: "900" },
 
+  cameraCancelBtn: {
+    marginTop: 18,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  cameraCancelText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
+    letterSpacing: 1,
+    textDecorationLine: "underline",
+  },
   // ─────────────────────────────────────────────
   // NEW — Welcome / Duty Card
   // ─────────────────────────────────────────────

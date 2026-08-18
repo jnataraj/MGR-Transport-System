@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Component, Plus, Edit, Trash2, Info, X } from "lucide-react";
+import { Component, Plus, Edit, Trash2, Info, X, Eye, EyeOff } from "lucide-react";
 import Sidebar from "../../components/Sidebar";
 import Topbar from "../../components/Topbar";
 import { fetchUsers, createUser, updateUser, deleteUser } from "../../api";
@@ -22,8 +22,8 @@ const mapUserToVM = (u) => ({
     shift: u.shift || "",
     joinedDate: u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "",
     image: `https://i.pravatar.cc/150?u=${u.id}`,
-    loginId: u.email,
-    password: u.password || "",
+    loginId: u.loginId || u.email || "",
+    password: u.password || u.plainPassword || "",
   },
 });
 
@@ -36,6 +36,8 @@ const Coordinators = () => {
   const [imagePreview, setImagePreview] = useState("");
   const [imageError, setImageError] = useState("");
   const [imageProcessing, setImageProcessing] = useState(false);
+  const [showDetailPassword, setShowDetailPassword] = useState(true);
+  const [showCoordModalPassword, setShowCoordModalPassword] = useState(false);
 
   const loadCoordinators = async () => {
     try {
@@ -286,15 +288,25 @@ const Coordinators = () => {
                       </div>
                       <div className="coord-field">
                         <label>App Password</label>
-                        <input
-                          name="password"
-                          type="text"
-                          placeholder="Set a login password"
-                          defaultValue={
-                            editCoordinator?.details?.password || ""
-                          }
-                          required
-                        />
+                        <div className="coord-password-input-wrapper">
+                          <input
+                            name="password"
+                            type={showCoordModalPassword ? "text" : "password"}
+                            placeholder="Set a login password"
+                            defaultValue={
+                              editCoordinator?.details?.password || ""
+                            }
+                            required={!editCoordinator}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowCoordModalPassword(!showCoordModalPassword)}
+                            className="coord-password-input-eye"
+                            title={showCoordModalPassword ? "Hide Password" : "Show Password"}
+                          >
+                            {showCoordModalPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -453,10 +465,24 @@ const Coordinators = () => {
                     {selectedCoordinator.details.loginId || "Not Assigned"}
                   </span>
                   <strong>Password:</strong>
-                  <span>
-                    {selectedCoordinator.details.password
-                      ? "••••••••"
-                      : "Not Assigned"}
+                  <span className="coord-detail-password-wrapper">
+                    {selectedCoordinator.details.password ? (
+                      <>
+                        <span className="coord-detail-password-text">
+                          {showDetailPassword ? selectedCoordinator.details.password : "••••••••"}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setShowDetailPassword((prev) => !prev)}
+                          className="coord-password-toggle-btn"
+                          title={showDetailPassword ? "Hide Password" : "Show Password"}
+                        >
+                          {showDetailPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                        </button>
+                      </>
+                    ) : (
+                      <span className="coord-detail-empty">Not Assigned</span>
+                    )}
                   </span>
                 </div>
               </div>

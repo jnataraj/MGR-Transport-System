@@ -9,6 +9,9 @@ router.get("/current", attendanceController.getCurrentStatus);
 // GET /api/attendance/vehicle-gps-status - Diagnostic: full GPS state for a vehicle
 router.get("/vehicle-gps-status", attendanceController.getVehicleGPSStatus);
 
+// GET /api/attendance/live-vehicles - All currently active/online vehicles
+router.get("/live-vehicles", attendanceController.getLiveVehicles);
+
 // GET /api/attendance/bus-location - Live GPS snapshot for student/parent map
 router.get("/bus-location", attendanceController.getBusLiveLocation);
 

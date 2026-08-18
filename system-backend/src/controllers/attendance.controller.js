@@ -1,6 +1,6 @@
 const prisma = require("../prisma/prisma");
 const { triggerNotification } = require("../utils/notification");
-const { getVehicleLocation, isVehicleOnline, calculateDistanceMeters, setVehicleLocation, clearVehicleLocation } = require("../utils/vehicleLocationStore");
+const { getVehicleLocation, isVehicleOnline, getAllOnlineVehicles, calculateDistanceMeters, setVehicleLocation, clearVehicleLocation } = require("../utils/vehicleLocationStore");
 
 exports.recordAttendance = async (req, res) => {
   try {
@@ -256,33 +256,56 @@ exports.recordAttendance = async (req, res) => {
       }
     }
 
-    // ── Auto-assign driver (only if the vehicle has no driver yet) ──
-    if (userRole.includes("driver") && vehicleRecord && !vehicleRecord.driverId) {
-      // Free them from any other vehicle they were previously driving.
-      const previousVehicle = await prisma.vehicle.findFirst({
-        where: { driverId: user.id, NOT: { id: vehicleRecord.id } },
-      });
-      if (previousVehicle) {
-        await prisma.vehicle.update({ where: { id: previousVehicle.id }, data: { driverId: null } });
-      }
-      await prisma.vehicle.update({ where: { id: vehicleRecord.id }, data: { driverId: user.id } });
-      rosterChanged = true;
-    }
-
-    // ── Seed / clear vehicle GPS store from driver's QR scan ──────────────────
-    // The socket-based watcher fires on movement (every 10 m). The QR scan
-    // is the FIRST authoritative GPS fix we have at duty-start — seed the
-    // store immediately so students can scan without waiting for a socket ping.
+    // ── Driver Scan handling (STARTED / CLOSED / auto-assign) ──
     if (userRole.includes("driver")) {
       const vehicleKey = vehicleRecord?.id || targetVehicle;
-      if (stage === "STARTED" && latitude != null && longitude != null) {
+      const isStart = stage === "STARTED";
+      const isClose = stage === "CLOSED";
+
+      // 1. Update Driver (User) status in database
+      const driverStatus = isStart ? "active" : isClose ? "offline" : undefined;
+      if (driverStatus) {
+        try {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { status: driverStatus },
+          });
+        } catch (uErr) {
+          console.error("Failed to update driver status:", uErr.message);
+        }
+      }
+
+      // 2. Update Vehicle driver assignment and status in database
+      if (vehicleRecord) {
+        try {
+          // Free this driver from any other vehicle they were previously driving
+          await prisma.vehicle.updateMany({
+            where: { driverId: user.id, NOT: { id: vehicleRecord.id } },
+            data: { driverId: null },
+          });
+
+          const vehicleStatus = isStart ? "active" : isClose ? "inactive" : undefined;
+          await prisma.vehicle.update({
+            where: { id: vehicleRecord.id },
+            data: {
+              driverId: user.id,
+              ...(vehicleStatus && { status: vehicleStatus }),
+            },
+          });
+          rosterChanged = true;
+        } catch (vErr) {
+          console.error("Failed to update vehicle driver/status:", vErr.message);
+        }
+      }
+
+      // 3. Seed / clear vehicle GPS store from driver's QR scan
+      if (isStart && latitude != null && longitude != null) {
         setVehicleLocation(vehicleKey, parseFloat(latitude), parseFloat(longitude));
-        // Also seed by plate number so both keys resolve correctly
         if (vehicleRecord?.number && vehicleRecord.number !== vehicleKey) {
           setVehicleLocation(vehicleRecord.number, parseFloat(latitude), parseFloat(longitude));
         }
         console.log(`[attendance] 🟢 Vehicle ${vehicleKey} seeded in GPS store at (${latitude}, ${longitude}) from STARTED scan`);
-      } else if (stage === "CLOSED") {
+      } else if (isClose) {
         clearVehicleLocation(vehicleKey);
         if (vehicleRecord?.number) clearVehicleLocation(vehicleRecord.number);
         console.log(`[attendance] 🔴 Vehicle ${vehicleKey} cleared from GPS store on CLOSED scan`);
@@ -309,6 +332,37 @@ exports.recordAttendance = async (req, res) => {
       io.to(`user_${user.id}`).emit("student_boarded", payload);
       io.to(userRole).emit("attendance_scanned", payload);
       io.emit("attendance_scanned", payload);
+
+      if (userRole.includes("driver")) {
+        const vId = vehicleRecord?.id || targetVehicle;
+        const vNum = vehicleRecord?.number || targetVehicle;
+        if (stage === "STARTED") {
+          io.emit("busLocationChanged", {
+            vehicleId: vId,
+            id: vId,
+            number: vNum,
+            latitude: latitude ? parseFloat(latitude) : undefined,
+            longitude: longitude ? parseFloat(longitude) : undefined,
+            lat: latitude ? parseFloat(latitude) : undefined,
+            lng: longitude ? parseFloat(longitude) : undefined,
+            role: "driver",
+            driverId: user.id,
+            status: "active",
+          });
+          io.emit("vehicleUpdated", { id: vId, number: vNum, driverId: user.id, status: "active" });
+          io.emit("userUpdated", { id: user.id, role: user.role, status: "active" });
+        } else if (stage === "CLOSED") {
+          io.emit("busLocationStopped", {
+            vehicleId: vId,
+            id: vId,
+            number: vNum,
+            driverId: user.id,
+            status: "offline",
+          });
+          io.emit("vehicleUpdated", { id: vId, number: vNum, status: "inactive" });
+          io.emit("userUpdated", { id: user.id, role: user.role, status: "offline" });
+        }
+      }
 
       // Tell the Vehicles admin page to refresh this vehicle's roster panel.
       if (rosterChanged && vehicleRecord) {
@@ -759,6 +813,23 @@ exports.getDepartmentAttendanceHistory = async (req, res) => {
     });
   } catch (error) {
     console.error("getDepartmentAttendanceHistory Error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * GET /api/attendance/live-vehicles
+ * Returns list of vehicle IDs / numbers currently active/online
+ */
+exports.getLiveVehicles = async (req, res) => {
+  try {
+    const liveVehicles = getAllOnlineVehicles();
+    return res.status(200).json({
+      success: true,
+      liveVehicles,
+    });
+  } catch (error) {
+    console.error("getLiveVehicles Error:", error);
     return res.status(500).json({ success: false, message: error.message });
   }
 };

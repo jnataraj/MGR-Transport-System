@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Crown, Plus, Edit, Trash2, Info, X } from "lucide-react";
+import { Crown, Plus, Edit, Trash2, Info, X, Eye, EyeOff } from "lucide-react";
 import Sidebar from "../../components/Sidebar";
 import Topbar from "../../components/Topbar";
 import { fetchUsers, createUser, updateUser, deleteUser } from "../../api";
@@ -21,8 +21,8 @@ const mapUserToVM = (u) => ({
     shift: u.shift || "",
     joinedDate: u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "",
     image: `https://i.pravatar.cc/150?u=${u.id}`,
-    loginId: u.email,
-    password: u.password || "",
+    loginId: u.loginId || u.email || "",
+    password: u.password || u.plainPassword || "",
   },
 });
 
@@ -35,6 +35,8 @@ const HoDs = () => {
   const [imagePreview, setImagePreview] = useState("");
   const [imageError, setImageError] = useState("");
   const [imageProcessing, setImageProcessing] = useState(false);
+  const [showDetailPassword, setShowDetailPassword] = useState(true);
+  const [showHoDModalPassword, setShowHoDModalPassword] = useState(false);
 
   const loadHoDs = async () => {
     try {
@@ -295,13 +297,23 @@ const HoDs = () => {
                       </div>
                       <div className="hod-field">
                         <label>App Password</label>
-                        <input
-                          name="password"
-                          type="text"
-                          placeholder="Set a login password"
-                          defaultValue={editHoD?.details?.password || ""}
-                          required
-                        />
+                        <div className="hod-password-input-wrapper">
+                          <input
+                            name="password"
+                            type={showHoDModalPassword ? "text" : "password"}
+                            placeholder="Set a login password"
+                            defaultValue={editHoD?.details?.password || ""}
+                            required={!editHoD}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowHoDModalPassword(!showHoDModalPassword)}
+                            className="hod-password-input-eye"
+                            title={showHoDModalPassword ? "Hide Password" : "Show Password"}
+                          >
+                            {showHoDModalPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -453,8 +465,24 @@ const HoDs = () => {
                   <strong>Login ID:</strong>
                   <span>{selectedHoD.details.loginId || "Not Assigned"}</span>
                   <strong>Password:</strong>
-                  <span>
-                    {selectedHoD.details.password ? "••••••••" : "Not Assigned"}
+                  <span className="hod-detail-password-wrapper">
+                    {selectedHoD.details.password ? (
+                      <>
+                        <span className="hod-detail-password-text">
+                          {showDetailPassword ? selectedHoD.details.password : "••••••••"}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setShowDetailPassword((prev) => !prev)}
+                          className="hod-password-toggle-btn"
+                          title={showDetailPassword ? "Hide Password" : "Show Password"}
+                        >
+                          {showDetailPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                        </button>
+                      </>
+                    ) : (
+                      <span className="hod-detail-empty">Not Assigned</span>
+                    )}
                   </span>
                 </div>
               </div>

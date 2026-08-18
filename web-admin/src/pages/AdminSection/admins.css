@@ -414,3 +414,68 @@
         grid-template-columns: 1fr;
     }
 }
+
+/* ============================================================
+   Admin Password Display & Input Toggle
+   ============================================================ */
+.adm-password-wrapper {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.adm-password-text {
+    font-weight: 600;
+    color: #111827;
+    letter-spacing: 0.02em;
+}
+
+.adm-password-toggle-btn {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 2px 4px;
+    color: #6b7280;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: all 0.15s ease;
+}
+
+.adm-password-toggle-btn:hover {
+    color: #2563eb;
+    background: #eff6ff;
+}
+
+.adm-password-input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 100%;
+}
+
+.adm-password-input-wrapper .adm-input {
+    padding-right: 38px !important;
+    width: 100%;
+}
+
+.adm-password-input-eye {
+    position: absolute;
+    right: 10px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: #6b7280;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    border-radius: 4px;
+    transition: color 0.15s ease;
+}
+
+.adm-password-input-eye:hover {
+    color: #2563eb;
+}

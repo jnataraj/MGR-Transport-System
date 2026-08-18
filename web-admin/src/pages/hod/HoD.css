@@ -494,6 +494,75 @@
 }
 
 /* ============================================================
+   Password Display & Input Toggle
+   ============================================================ */
+.hod-detail-password-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hod-detail-password-text {
+  font-weight: 600;
+  color: var(--hod-text-main);
+  letter-spacing: 0.02em;
+}
+
+.hod-password-toggle-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 3px 6px;
+  color: var(--hod-text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.hod-password-toggle-btn:hover {
+  color: var(--hod-accent);
+  background: var(--hod-accent-light);
+}
+
+.hod-detail-empty {
+  color: var(--hod-text-muted);
+  font-style: italic;
+}
+
+.hod-password-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.hod-password-input-wrapper input {
+  padding-right: 38px !important;
+  width: 100%;
+}
+
+.hod-password-input-eye {
+  position: absolute;
+  right: 10px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--hod-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 4px;
+  transition: color 0.15s ease;
+}
+
+.hod-password-input-eye:hover {
+  color: var(--hod-accent);
+}
+
+/* ============================================================
    Responsive
    ============================================================ */
 @media (max-width: 640px) {

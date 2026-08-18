@@ -18,6 +18,17 @@ const isVehicleOnline = (vehicleId, thresholdMs = 45000) => {
     return Date.now() - loc.updatedAt.getTime() < thresholdMs;
 };
 
+const getAllOnlineVehicles = (thresholdMs = 45000) => {
+    const onlineIds = [];
+    const now = Date.now();
+    for (const [vehicleId, loc] of vehicleLocations.entries()) {
+        if (now - loc.updatedAt.getTime() < thresholdMs) {
+            onlineIds.push(vehicleId);
+        }
+    }
+    return onlineIds;
+};
+
 const clearVehicleLocation = (vehicleId) => vehicleLocations.delete(vehicleId);
 
 /**
@@ -48,4 +59,4 @@ const calculateDistanceMeters = (lat1, lon1, lat2, lon2) => {
     return R * c;
 };
 
-module.exports = { setVehicleLocation, getVehicleLocation, isVehicleOnline, clearVehicleLocation, calculateDistanceMeters };
+module.exports = { setVehicleLocation, getVehicleLocation, isVehicleOnline, getAllOnlineVehicles, clearVehicleLocation, calculateDistanceMeters };

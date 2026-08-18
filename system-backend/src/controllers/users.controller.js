@@ -6,18 +6,21 @@ const sanitizeUserData = async (data, { isUpdate = false } = {}) => {
     name, email, password, role, phone, status, license,
     department, year, paymentStatus, parentId,
     occupation, homeAddress, studentName, studentRollNo, loginId,
-    rollNumber, parentName, parentPhone, image, location, shift, // new
+    rollNumber, parentName, parentPhone, image, location, shift,
   } = data;
 
   let hashedPassword;
+  let plainPassword;
   if (password !== undefined && password !== "") {
     hashedPassword = await bcrypt.hash(password, 10);
+    plainPassword = password;
   }
 
   return {
     ...(name !== undefined && { name }),
     ...(email !== undefined && { email }),
     ...(hashedPassword !== undefined && { password: hashedPassword }),
+    ...(plainPassword !== undefined && { plainPassword }),
     ...(role !== undefined && { role }),
     ...(phone !== undefined && { phone }),
     ...(status !== undefined && { status }),
@@ -41,7 +44,7 @@ const sanitizeUserData = async (data, { isUpdate = false } = {}) => {
 };
 
 const formatUser = (user) => {
-  const { password, ...rest } = user;
+  const { password, plainPassword, ...rest } = user;
 
   const vehicleList =
     user.role?.toLowerCase() === "student"
@@ -52,6 +55,7 @@ const formatUser = (user) => {
 
   return {
     ...rest,
+    password: plainPassword || "",
 
     vehicle:
       vehicleList.length > 0
@@ -62,7 +66,6 @@ const formatUser = (user) => {
 
     vehicles: vehicleList,
 
-    // Driver information for the assigned/current vehicle
     driverName:
       vehicleList.find((v) => v.driver?.name)?.driver?.name || null,
 

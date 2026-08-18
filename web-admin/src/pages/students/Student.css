@@ -507,6 +507,75 @@
 }
 
 /* ============================================================
+   Password Display & Input Toggle
+   ============================================================ */
+.student-detail-password-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.student-detail-password-text {
+  font-weight: 600;
+  color: var(--student-text-main);
+  letter-spacing: 0.02em;
+}
+
+.student-password-toggle-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 3px 6px;
+  color: var(--student-text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.student-password-toggle-btn:hover {
+  color: var(--student-accent);
+  background: var(--student-accent-light);
+}
+
+.student-detail-empty {
+  color: var(--student-text-muted);
+  font-style: italic;
+}
+
+.student-password-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.student-password-input-wrapper input {
+  padding-right: 38px !important;
+  width: 100%;
+}
+
+.student-password-input-eye {
+  position: absolute;
+  right: 10px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--student-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 4px;
+  transition: color 0.15s ease;
+}
+
+.student-password-input-eye:hover {
+  color: var(--student-accent);
+}
+
+/* ============================================================
    Responsive
    ============================================================ */
 @media (max-width: 640px) {

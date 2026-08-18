@@ -33,8 +33,9 @@ const io = new Server(server, {
 
 app.set("io", io);
 
-// Track which vehicleId belongs to which socket
+// Track which vehicleId and driverId belong to which socket
 const socketVehicleMap = new Map();
+const socketDriverMap = new Map();
 
 io.on("connection", (socket) => {
   socket.on("joinRoom", (role) => {
@@ -52,6 +53,9 @@ io.on("connection", (socket) => {
   socket.on("driverLocationUpdate", (data) => {
     if (!data || !data.vehicleId) return;
     socketVehicleMap.set(socket.id, data.vehicleId);
+    if (data.driverId || data.userId) {
+      socketDriverMap.set(socket.id, data.driverId || data.userId);
+    }
     const latitude = data.latitude ?? data.lat;
     const longitude = data.longitude ?? data.lng;
     setVehicleLocation(data.vehicleId, latitude, longitude);
@@ -61,16 +65,21 @@ io.on("connection", (socket) => {
   socket.on("driverLocationStopped", (data) => {
     if (!data || !data.vehicleId) return;
     socketVehicleMap.delete(socket.id);
+    socketDriverMap.delete(socket.id);
     clearVehicleLocation(data.vehicleId);
     io.emit("busLocationStopped", data);
   });
 
   socket.on("disconnect", () => {
     const vehicleId = socketVehicleMap.get(socket.id);
-    if (vehicleId) {
-      io.emit("busLocationStopped", { vehicleId });
-      clearVehicleLocation(vehicleId);
+    const driverId = socketDriverMap.get(socket.id);
+    if (vehicleId || driverId) {
+      if (vehicleId) {
+        clearVehicleLocation(vehicleId);
+      }
+      io.emit("busLocationStopped", { vehicleId, driverId, reason: "disconnected" });
       socketVehicleMap.delete(socket.id);
+      socketDriverMap.delete(socket.id);
     }
   });
 });

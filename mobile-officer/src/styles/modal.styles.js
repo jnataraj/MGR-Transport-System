@@ -22,4 +22,21 @@ export const subModalStyles = StyleSheet.create({
     fontWeight: "900",
     color: "#fff",
   },
+  cameraCloseBtn: {
+    position: "absolute",
+    top: 50,
+    left: 20,
+    zIndex: 20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  cameraCloseBtnText: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "900",
+  },
 });

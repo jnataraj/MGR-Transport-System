@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { GraduationCap, Plus, Edit, Trash2, Info, X } from "lucide-react";
+import { GraduationCap, Plus, Edit, Trash2, Info, X, Eye, EyeOff } from "lucide-react";
 import Sidebar from "../../components/Sidebar";
 import Topbar from "../../components/Topbar";
 import { fetchUsers, createUser, fetchVehicles, updateUser, assignStudentBus, socket, deleteUser } from "../../api";
@@ -26,6 +26,8 @@ const Students = () => {
   const [imagePreview, setImagePreview] = useState("");
   const [imageError, setImageError] = useState("");
   const [imageProcessing, setImageProcessing] = useState(false);
+  const [showDetailPassword, setShowDetailPassword] = useState(true);
+  const [showStudentModalPassword, setShowStudentModalPassword] = useState(false);
 
   const mapUserToRow = (user, extras = {}) => {
     const image = user.image || `https://i.pravatar.cc/150?u=${user.id}`;
@@ -52,8 +54,8 @@ const Students = () => {
           amountPending: "N/A",
           nextTermDue: "N/A",
         },
-        loginId: user.email,
-        password: extras.password || user.password || "",
+        loginId: user.loginId || user.email || "N/A",
+        password: extras.password || user.password || user.plainPassword || "",
         image,
       },
     };
@@ -424,13 +426,23 @@ const Students = () => {
                       </div>
                       <div className="student-field">
                         <label>Password</label>
-                        <input
-                          name="password"
-                          type="text"
-                          placeholder="Set a login password"
-                          defaultValue={editStudent?.details?.password || ""}
-                          required
-                        />
+                        <div className="student-password-input-wrapper">
+                          <input
+                            name="password"
+                            type={showStudentModalPassword ? "text" : "password"}
+                            placeholder="Set a login password"
+                            defaultValue={editStudent?.details?.password || ""}
+                            required={!editStudent}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowStudentModalPassword(!showStudentModalPassword)}
+                            className="student-password-input-eye"
+                            title={showStudentModalPassword ? "Hide Password" : "Show Password"}
+                          >
+                            {showStudentModalPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -619,10 +631,24 @@ const Students = () => {
                     {selectedStudent.details.loginId || "Not Assigned"}
                   </span>
                   <strong>Password:</strong>
-                  <span>
-                    {selectedStudent.details.password
-                      ? "••••••••"
-                      : "Not Assigned"}
+                  <span className="student-detail-password-wrapper">
+                    {selectedStudent.details.password ? (
+                      <>
+                        <span className="student-detail-password-text">
+                          {showDetailPassword ? selectedStudent.details.password : "••••••••"}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setShowDetailPassword((prev) => !prev)}
+                          className="student-password-toggle-btn"
+                          title={showDetailPassword ? "Hide Password" : "Show Password"}
+                        >
+                          {showDetailPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                        </button>
+                      </>
+                    ) : (
+                      <span className="student-detail-empty">Not Assigned</span>
+                    )}
                   </span>
                 </div>
               </div>

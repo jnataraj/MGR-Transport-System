@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { UserCog, Plus, Edit, Trash2, Info, X } from "lucide-react";
+import { UserCog, Plus, Edit, Trash2, Info, X, Eye, EyeOff } from "lucide-react";
 import Sidebar from "../../components/Sidebar";
 import Topbar from "../../components/Topbar";
 import Modal from "../../components/Modal";
-import { fetchUsers, createUser, updateUser, fetchVehicles, socket, deleteUser, } from "../../api";
+import { fetchUsers, createUser, updateUser, fetchVehicles, fetchLiveVehicles, socket, deleteUser, } from "../../api";
 import "./Drivers.css";
 import ConfirmDialog from "../../components/ConfirmDialog/ConfirmDialog";
 import { handleImageChange } from "../../components/imageResize";
@@ -39,9 +39,12 @@ const getStatusStyles = (status) => {
 };
 
 const isDriverLive = (user, liveVehicles) => {
+  if (!user || !liveVehicles || liveVehicles.size === 0) return false;
   return (
+    liveVehicles.has(user.id) ||
     liveVehicles.has(user.vehicle) ||
-    user.vehicleIds?.some((id) => liveVehicles.has(id))
+    user.vehicleIds?.some((id) => liveVehicles.has(id)) ||
+    (user.vehicles || []).some((v) => liveVehicles.has(v.id) || liveVehicles.has(v.number))
   );
 };
 
@@ -52,12 +55,19 @@ const Drivers = () => {
   const [editDriver, setEditDriver] = useState(null);
   const [liveVehicles, setLiveVehicles] = useState(new Set());
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [showDetailPassword, setShowDetailPassword] = useState(true);
   // const [imagePreview, setImagePreview] = useState("");
   // const [imageError, setImageError] = useState("");
 
   const loadDrivers = useCallback(async () => {
     try {
-      const drivers = await fetchUsers("driver");
+      const [drivers, liveList] = await Promise.all([
+        fetchUsers("driver"),
+        fetchLiveVehicles(),
+      ]);
+      if (Array.isArray(liveList)) {
+        setLiveVehicles(new Set(liveList));
+      }
       const mapped = drivers.map((d) => formatDriver(d));
       setData(mapped);
     } catch (error) {
@@ -68,25 +78,43 @@ const Drivers = () => {
   useEffect(() => {
     const onLive = (d) => {
       const vId = d.vehicleId || d.id;
-      if (!vId) return;
-      setLiveVehicles((prev) => new Set(prev).add(vId));
-    };
-    const onStopped = (d) => {
-      const vId = d.vehicleId || d.id;
-      if (!vId) return;
+      const num = d.number;
+      const drvId = d.driverId || d.userId;
       setLiveVehicles((prev) => {
         const next = new Set(prev);
-        next.delete(vId);
+        if (vId) next.add(vId);
+        if (num) next.add(num);
+        if (drvId) next.add(drvId);
         return next;
       });
     };
+    const onStopped = (d) => {
+      const vId = d.vehicleId || d.id;
+      const num = d.number;
+      const drvId = d.driverId || d.userId;
+      setLiveVehicles((prev) => {
+        const next = new Set(prev);
+        if (vId) next.delete(vId);
+        if (num) next.delete(num);
+        if (drvId) next.delete(drvId);
+        return next;
+      });
+    };
+    const refresh = () => loadDrivers();
+
     socket.on("busLocationChanged", onLive);
     socket.on("busLocationStopped", onStopped);
+    socket.on("userUpdated", refresh);
+    socket.on("vehicleMembersUpdated", refresh);
+    socket.on("attendance_scanned", refresh);
     return () => {
       socket.off("busLocationChanged", onLive);
       socket.off("busLocationStopped", onStopped);
+      socket.off("userUpdated", refresh);
+      socket.off("vehicleMembersUpdated", refresh);
+      socket.off("attendance_scanned", refresh);
     };
-  }, []);
+  }, [loadDrivers]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(loadDrivers, 0);
@@ -114,7 +142,7 @@ const Drivers = () => {
       image: d.image || d.details?.image || `https://i.pravatar.cc/150?u=${d.id}`,
       staffType: d.staffType || d.details?.staffType || "Driver",
       loginId: d.loginId || d.email || d.details?.loginId || "",
-      password: d.password || d.details?.password || "",
+      password: d.password || d.plainPassword || d.details?.password || d.details?.plainPassword || "",
       shiftData: d.shiftData || d.details?.shiftData || {},
     },
   });
@@ -125,8 +153,9 @@ const Drivers = () => {
         const payload = {
           ...driverData,
           role: "DRIVER",
+          loginId: driverData.loginId,
           email: driverData.loginId
-            ? `${driverData.loginId}@ctms.local`
+            ? (driverData.loginId.includes("@") ? driverData.loginId : `${driverData.loginId}@ctms.local`)
             : editDriver.details.loginId,
         };
 
@@ -137,7 +166,10 @@ const Drivers = () => {
 
         const updatedUser = await updateUser(editDriver.id, payload);
 
-        const updatedDriver = formatDriver(updatedUser);
+        const updatedDriver = formatDriver({
+          ...updatedUser,
+          password: payload.password || editDriver.details.password || updatedUser.password,
+        });
 
         setData((prev) =>
           prev.map((d) => (d.id === updatedDriver.id ? updatedDriver : d))
@@ -151,13 +183,19 @@ const Drivers = () => {
           ...driverData,
           role: "DRIVER",
           status: "Offline",
+          loginId: driverData.loginId,
           email: driverData.loginId
-            ? `${driverData.loginId}@ctms.local`
+            ? (driverData.loginId.includes("@") ? driverData.loginId : `${driverData.loginId}@ctms.local`)
             : undefined,
           password: driverData.password,
         });
 
-        setData((prev) => [...prev, newUser].map(formatDriver));
+        const createdDriver = formatDriver({
+          ...newUser,
+          password: driverData.password || newUser.password,
+        });
+
+        setData((prev) => [...prev, createdDriver]);
       }
 
       setIsModalOpen(false);
@@ -237,19 +275,18 @@ const Drivers = () => {
                     <td>
                       {(() => {
                         const live = isDriverLive(user, liveVehicles);
-                        const isActive = live || user.status?.toLowerCase() === "active";
 
                         return (
                           <>
                             <span
                               className={
                                 "dr-status-badge " +
-                                (isActive
+                                (live
                                   ? "dr-status-badge--active"
                                   : "dr-status-badge--inactive")
                               }
                             >
-                              {isActive ? "Active" : "Offline"}
+                              {live ? "Active" : "Offline"}
                             </span>
 
                             {live && (
@@ -365,10 +402,24 @@ const Drivers = () => {
                     {selectedStaff.details.loginId || "Not Assigned"}
                   </span>
                   <strong className="dr-detail-label">Password:</strong>{" "}
-                  <span className="dr-detail-value">
-                    {selectedStaff.details.password
-                      ? "••••••••"
-                      : "Not Assigned"}
+                  <span className="dr-detail-value dr-detail-password-wrapper">
+                    {selectedStaff.details.password ? (
+                      <>
+                        <span className="dr-detail-password-text">
+                          {showDetailPassword ? selectedStaff.details.password : "••••••••"}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setShowDetailPassword((prev) => !prev)}
+                          className="dr-password-toggle-btn"
+                          title={showDetailPassword ? "Hide Password" : "Show Password"}
+                        >
+                          {showDetailPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                        </button>
+                      </>
+                    ) : (
+                      <span className="dr-detail-empty">Not Available</span>
+                    )}
                   </span>
                   {/* Operational Section */}
                   <div className="dr-sechead dr-sechead--ops">
@@ -382,16 +433,16 @@ const Drivers = () => {
                     className="dr-detail-status"
                     style={{
                       color: getStatusStyles(
-                        liveVehicles.has(selectedStaff.vehicle) ? "active" : "offline"
+                        isDriverLive(selectedStaff, liveVehicles) ? "active" : "offline"
                       ).text,
                     }}
                   >
-                    {liveVehicles.has(selectedStaff.vehicle) ? "Active" : "Offline"}
+                    {isDriverLive(selectedStaff, liveVehicles) ? "Active" : "Offline"}
                   </span>
-                  {liveVehicles.has(selectedStaff.vehicle) && (
+                  {isDriverLive(selectedStaff, liveVehicles) && (
                     <>
                       <strong className="dr-detail-label">Live GPS:</strong>
-                      <span style={{ color: "#059669", fontWeight: 800 }}>🟢 Active — sharing location now</span>
+                      <span style={{ color: "#059669", fontWeight: 800 }}>🟢 Active — on duty</span>
                     </>
                   )}
                   <strong className="dr-detail-label">Assigned Vehicle:</strong>{" "}
@@ -450,6 +501,7 @@ export default Drivers;
 const DriverForm = ({ driver, onSave, onCancel }) => {
   const [imagePreview, setImagePreview] = useState("");
   const [imageError, setImageError] = useState("");
+  const [showFormPassword, setShowFormPassword] = useState(false);
 
   const emptyData = {
     id: "",
@@ -483,7 +535,7 @@ const DriverForm = ({ driver, onSave, onCancel }) => {
         workId: driver.details?.employeeId || "",
         staffType: driver.details?.staffType || "Driver",
         loginId: driver.details?.loginId || "",
-        password: "",
+        password: driver.password || driver.details?.password || "",
       });
       // setImagePreview(driver.details?.image?.startsWith("data:") ? driver.details.image : "");
       setImagePreview(driver.details?.image || "");
@@ -727,17 +779,27 @@ const DriverForm = ({ driver, onSave, onCancel }) => {
           </div>
           <div className="dr-form-col">
             <label className="dr-form-label">App Password</label>
-            <input
-              name="password"
-              type="password"
-              value={formData.password}
-              onChange={handleChange}
-              placeholder={
-                driver ? "Leave blank to keep current password" : "Enter password"
-              }
-              required={!driver}
-              className="dr-form-input"
-            />
+            <div className="dr-password-input-wrapper">
+              <input
+                name="password"
+                type={showFormPassword ? "text" : "password"}
+                value={formData.password}
+                onChange={handleChange}
+                placeholder={
+                  driver ? "Leave blank to keep current password" : "Enter password"
+                }
+                required={!driver}
+                className="dr-form-input"
+              />
+              <button
+                type="button"
+                onClick={() => setShowFormPassword((prev) => !prev)}
+                className="dr-password-input-eye"
+                title={showFormPassword ? "Hide Password" : "Show Password"}
+              >
+                {showFormPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
           </div>
         </div>
       </div>

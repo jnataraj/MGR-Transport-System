@@ -442,6 +442,73 @@
 }
 
 /* ============================================================
+   Password Display & Input Toggle
+   ============================================================ */
+.dr-detail-password-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dr-detail-password-text {
+  font-weight: 600;
+  color: var(--dr-text-main);
+  letter-spacing: 0.02em;
+}
+
+.dr-password-toggle-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 3px 6px;
+  color: var(--dr-text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.dr-password-toggle-btn:hover {
+  color: var(--dr-accent);
+  background: var(--dr-accent-light);
+}
+
+.dr-detail-empty {
+  color: var(--dr-text-muted);
+  font-style: italic;
+}
+
+.dr-password-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.dr-password-input-wrapper .dr-form-input {
+  padding-right: 40px;
+}
+
+.dr-password-input-eye {
+  position: absolute;
+  right: 10px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--dr-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 4px;
+  transition: color 0.15s ease;
+}
+
+.dr-password-input-eye:hover {
+  color: var(--dr-accent);
+}
+
+/* ============================================================
    Responsive
    ============================================================ */
 @media (max-width: 640px) {
@@ -460,3 +527,4 @@
     width: 100%;
   }
 }
+

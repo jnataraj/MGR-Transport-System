@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Plus, X, Edit2, Trash2, UserPlus, UserMinus } from "lucide-react";
+import { Plus, X, Edit2, Trash2, UserPlus, UserMinus, Eye, EyeOff } from "lucide-react";
 import Sidebar from "../../components/Sidebar";
 import Topbar from "../../components/Topbar";
 import {
@@ -73,6 +73,16 @@ const Admins = () => {
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState("");
     const [confirmDelete, setConfirmDelete] = useState(null);
+    const [adminDeleteTarget, setAdminDeleteTarget] = useState(null);
+    const [revealedAdminPasswords, setRevealedAdminPasswords] = useState({});
+    const [showAdminFormPassword, setShowAdminFormPassword] = useState(false);
+
+    const toggleAdminPassword = (adminId) => {
+        setRevealedAdminPasswords((prev) => ({
+            ...prev,
+            [adminId]: !prev[adminId],
+        }));
+    };
 
     const loadAll = useCallback(async () => {
         setLoading(true);
@@ -446,6 +456,8 @@ const Admins = () => {
                                 <tr>
                                     <th>Admin Name</th>
                                     <th>Email</th>
+                                    <th>Web Login ID</th>
+                                    <th>Password</th>
                                     <th>Role</th>
                                     <th>Admin Section / Incharge</th>
                                     <th>Status</th>
@@ -455,13 +467,13 @@ const Admins = () => {
                             <tbody>
                                 {loading ? (
                                     <tr>
-                                        <td colSpan={6} className="adm-empty-cell">
+                                        <td colSpan={8} className="adm-empty-cell">
                                             Loading admins…
                                         </td>
                                     </tr>
                                 ) : admins.length === 0 ? (
                                     <tr>
-                                        <td colSpan={6} className="adm-empty-cell">
+                                        <td colSpan={8} className="adm-empty-cell">
                                             No admins added yet.
                                         </td>
                                     </tr>
@@ -470,15 +482,30 @@ const Admins = () => {
                                         <tr key={admin.id}>
                                             <td className="adm-name-cell">👤 {admin.name}</td>
                                             <td>{admin.email}</td>
+                                            <td>{admin.loginId || "—"}</td>
+                                            <td>
+                                                <span className="adm-password-wrapper">
+                                                    {admin.password ? (
+                                                        <>
+                                                            <span className="adm-password-text">
+                                                                {revealedAdminPasswords[admin.id] ? admin.password : "••••••••"}
+                                                            </span>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => toggleAdminPassword(admin.id)}
+                                                                className="adm-password-toggle-btn"
+                                                                title={revealedAdminPasswords[admin.id] ? "Hide Password" : "Show Password"}
+                                                            >
+                                                                {revealedAdminPasswords[admin.id] ? <EyeOff size={14} /> : <Eye size={14} />}
+                                                            </button>
+                                                        </>
+                                                    ) : (
+                                                        <span className="adm-muted">Not Available</span>
+                                                    )}
+                                                </span>
+                                            </td>
                                             <td>{admin.roleHeader || "Dept Admin"}</td>
                                             <td>
-                                                {/* {admin.sector ? (
-                                                    <span className="adm-badge">
-                                                        Admin Section: {admin.sector}
-                                                    </span>
-                                                ) : (
-                                                    <span className="adm-muted">Unassigned</span>
-                                                )} */}
                                                 {admin.sectors?.length ? (
                                                     <span className="adm-badge">
                                                         {admin.sectors.join(", ")}
@@ -850,20 +877,30 @@ const Admins = () => {
                                             </div>
                                             <div>
                                                 <label className="adm-label">Password</label>
-                                                <input
-                                                    className="adm-input"
-                                                    type="password"
-                                                    placeholder={
-                                                        editingAdminId ? "Leave blank to keep current" : ""
-                                                    }
-                                                    value={adminForm.password}
-                                                    onChange={(e) =>
-                                                        setAdminForm((p) => ({
-                                                            ...p,
-                                                            password: e.target.value,
-                                                        }))
-                                                    }
-                                                />
+                                                <div className="adm-password-input-wrapper">
+                                                    <input
+                                                        className="adm-input"
+                                                        type={showAdminFormPassword ? "text" : "password"}
+                                                        placeholder={
+                                                            editingAdminId ? "Leave blank to keep current" : ""
+                                                        }
+                                                        value={adminForm.password}
+                                                        onChange={(e) =>
+                                                            setAdminForm((p) => ({
+                                                                ...p,
+                                                                password: e.target.value,
+                                                            }))
+                                                        }
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setShowAdminFormPassword(!showAdminFormPassword)}
+                                                        className="adm-password-input-eye"
+                                                        title={showAdminFormPassword ? "Hide Password" : "Show Password"}
+                                                    >
+                                                        {showAdminFormPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>

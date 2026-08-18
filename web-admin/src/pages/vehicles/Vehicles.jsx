@@ -25,6 +25,7 @@ import Modal from "../../components/Modal";
 import { socket } from "../../api";
 import {
   fetchVehicles,
+  fetchLiveVehicles,
   createVehicle,
   fetchUsers,
   fetchVehicleMembers,
@@ -1181,28 +1182,21 @@ const Vehicles = () => {
   const [editVehicle, setEditVehicle] = useState(null);
   const [viewAllMembers, setViewAllMembers] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
-
-  // const loadVehicles = useCallback(async () => {
-  //   try {
-  //     setLoading(true);
-  //     const data = await fetchVehicles();
-  //     setVehicles(data);
-  //   } catch (err) {
-  //     console.error("Error loading vehicles:", err);
-  //   } finally {
-  //     setLoading(false);
-  //   }
-  // }, []);
+  const [liveVehicles, setLiveVehicles] = useState(new Set());
 
   const loadVehicles = useCallback(async () => {
     try {
       setLoading(true);
 
-      const [vehicleData, driverData] = await Promise.all([
+      const [vehicleData, driverData, liveList] = await Promise.all([
         fetchVehicles(),
         fetchUsers("driver"),
+        fetchLiveVehicles(),
       ]);
 
+      if (Array.isArray(liveList)) {
+        setLiveVehicles(new Set(liveList));
+      }
       setVehicles(vehicleData);
       setDrivers(driverData);
     } catch (err) {
@@ -1219,27 +1213,43 @@ const Vehicles = () => {
 
   useEffect(() => {
     const handler = () => loadVehicles();
+    const onLive = (d) => {
+      const vId = d.vehicleId || d.id;
+      const num = d.number;
+      setLiveVehicles((prev) => {
+        const next = new Set(prev);
+        if (vId) next.add(vId);
+        if (num) next.add(num);
+        return next;
+      });
+    };
+
+    const onStopped = (d) => {
+      const vId = d.vehicleId || d.id;
+      const num = d.number;
+      setLiveVehicles((prev) => {
+        const next = new Set(prev);
+        if (vId) next.delete(vId);
+        if (num) next.delete(num);
+        return next;
+      });
+    };
+
+    socket.on("busLocationChanged", onLive);
+    socket.on("busLocationStopped", onStopped);
     socket.on("vehicleMembersUpdated", handler);
     socket.on("vehicleCreated", handler);
     socket.on("vehicleUpdated", handler);
+    socket.on("userUpdated", handler);
+    socket.on("attendance_scanned", handler);
     return () => {
+      socket.off("busLocationChanged", onLive);
+      socket.off("busLocationStopped", onStopped);
       socket.off("vehicleMembersUpdated", handler);
       socket.off("vehicleCreated", handler);
       socket.off("vehicleUpdated", handler);
-    };
-  }, [loadVehicles]);
-
-  useEffect(() => {
-    const refreshStatus = () => {
-      loadVehicles();
-    };
-
-    socket.on("busLocationChanged", refreshStatus);
-    socket.on("busLocationStopped", refreshStatus);
-
-    return () => {
-      socket.off("busLocationChanged", refreshStatus);
-      socket.off("busLocationStopped", refreshStatus);
+      socket.off("userUpdated", handler);
+      socket.off("attendance_scanned", handler);
     };
   }, [loadVehicles]);
 
@@ -1299,24 +1309,14 @@ const Vehicles = () => {
     }
   };
 
+  const isVehicleLive = (vehicle) => {
+    if (!vehicle || !liveVehicles || liveVehicles.size === 0) return false;
+    return liveVehicles.has(vehicle.id) || (vehicle.number && liveVehicles.has(vehicle.number));
+  };
+
   const getVehicleDriverStatus = (vehicle) => {
-    // No driver assigned
-    if (!vehicle.driverId) {
-      return "Offline";
-    }
-
-    // Find assigned driver
-    const driver = drivers.find((d) => d.id === vehicle.driverId);
-
-    // Driver not found
-    if (!driver) {
-      return "Offline";
-    }
-
-    // Vehicle is Active ONLY when assigned driver is Active
-    return driver.status?.toLowerCase() === "active"
-      ? "Active"
-      : "Offline";
+    if (!vehicle) return "Offline";
+    return isVehicleLive(vehicle) ? "Active" : "Offline";
   };
 
   const isActiveStatus = (status) =>

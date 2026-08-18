@@ -535,31 +535,68 @@ export default function MainDashboard({ user, token, onLogout }) {
 
   useEffect(() => {
     let locationWatcher = null;
+    let heartbeatInterval = null;
 
     const shouldTrack = role === "driver" && qrStatus === "STARTED" && gpsEnabled;
 
     if (shouldTrack) {
+      const emitLocation = (coords) => {
+        if (!coords) return;
+        socketRef.current?.emit("driverLocationUpdate", {
+          vehicleId: userVehicle,
+          driverId: userId,
+          role: "driver",
+          lat: coords.latitude,
+          lng: coords.longitude,
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+          timestamp: new Date().toISOString(),
+        });
+      };
+
       (async () => {
-        locationWatcher = await Location.watchPositionAsync(
-          { accuracy: Location.Accuracy.High, distanceInterval: 10 },
-          (loc) => {
-            socketRef.current?.emit("driverLocationUpdate", {
-              vehicleId: userVehicle,
-              lat: loc.coords.latitude,
-              lng: loc.coords.longitude,
-              timestamp: new Date().toISOString(),
-            });
-          },
-        );
+        // 1. Immediate position fix
+        try {
+          const initialLoc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          if (initialLoc?.coords) {
+            emitLocation(initialLoc.coords);
+          }
+        } catch (e) {
+          console.log("Initial GPS fix error:", e.message);
+        }
+
+        // 2. Continuous position watcher (every 10m)
+        try {
+          locationWatcher = await Location.watchPositionAsync(
+            { accuracy: Location.Accuracy.High, distanceInterval: 10 },
+            (loc) => emitLocation(loc.coords),
+          );
+        } catch (e) {
+          console.log("watchPositionAsync error:", e.message);
+        }
+
+        // 3. Periodic heartbeat every 15s so vehicle stays online even when stationary
+        heartbeatInterval = setInterval(async () => {
+          try {
+            const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }).catch(() => null);
+            if (loc?.coords) {
+              emitLocation(loc.coords);
+            }
+          } catch { }
+        }, 15000);
       })();
     } else if (role === "driver") {
       socketRef.current?.emit("driverLocationStopped", {
         vehicleId: userVehicle,
+        driverId: userId,
       });
     }
 
-    return () => locationWatcher?.remove();
-  }, [qrStatus, gpsEnabled, role]);
+    return () => {
+      locationWatcher?.remove();
+      if (heartbeatInterval) clearInterval(heartbeatInterval);
+    };
+  }, [qrStatus, gpsEnabled, role, userVehicle, userId]);
 
   useEffect(() => {
     (async () => {
@@ -2050,11 +2087,17 @@ export default function MainDashboard({ user, token, onLogout }) {
       {/* Modals */}
       <Modal visible={isCameraOpen} animationType="slide">
         <View style={styles.cameraContainer}>
+          <TouchableOpacity
+            style={styles.cameraCloseBtn}
+            onPress={() => setIsCameraOpen(false)}
+          >
+            <Text style={styles.cameraCloseBtnText}>✕</Text>
+          </TouchableOpacity>
           <CameraView style={styles.camera} ref={cameraRef} facing="back">
             <View style={styles.cameraFrame}>
               <Text style={styles.cameraTitle}>
                 {cameraMode === "QR"
-                  ? qrStatus === "STARTED" ? "Close Attendance (QR Scan)" : "Initial Scan (Start Work)"
+                  ? qrStatus === "STARTED" ? "Close Attendance (QR Scan)12" : "Initial Scan (Start Work)"
                   : selfieStatus === "VERIFIED" ? "Close/Hault Vehicle Verification" : "Vehicle Verification Selfie (Start)"}
               </Text>
               <View style={cameraMode === "QR" ? styles.wrapperQR : styles.wrapperFace} />
@@ -4199,5 +4242,22 @@ const subModalStyles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "900",
     color: "#fff",
+  },
+  cameraCloseBtn: {
+    position: "absolute",
+    top: 50,
+    left: 20,
+    zIndex: 20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  cameraCloseBtnText: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "900",
   },
 });

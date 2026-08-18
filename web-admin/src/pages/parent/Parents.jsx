@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Users, Plus, Edit, Trash2, Info, X, GraduationCap } from "lucide-react";
+import { Users, Plus, Edit, Trash2, Info, X, GraduationCap, Eye, EyeOff } from "lucide-react";
 import Sidebar from "../../components/Sidebar";
 import Topbar from "../../components/Topbar";
 import { fetchUsers, createUser, updateUser, deleteUser } from "../../api";
@@ -25,8 +25,8 @@ const mapUserToVM = (u, studentMatch) => {
       email: u.email,
       occupation: u.occupation || "",
       homeAddress: u.homeAddress || "",
-      loginId: u.email,
-      password: u.password || "",
+      loginId: u.loginId || u.email || "",
+      password: u.password || u.plainPassword || "",
       studentData: {
         name: u.studentName || studentMatch?.name || "N/A",
         rollNo: u.studentRollNo || studentMatch?.rollNumber || "",
@@ -49,6 +49,8 @@ const Parents = () => {
   const [imagePreview, setImagePreview] = useState("");
   const [imageError, setImageError] = useState("");
   const [imageProcessing, setImageProcessing] = useState(false);
+  const [showDetailPassword, setShowDetailPassword] = useState(true);
+  const [showParentModalPassword, setShowParentModalPassword] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState(
     editParent?.student || ""
   );
@@ -388,17 +390,27 @@ const Parents = () => {
                       </div>
                       <div className="parent-field">
                         <label>App Password</label>
-                        <input
-                          name="password"
-                          type="text"
-                          placeholder={
-                            editParent
-                              ? "Leave blank to keep current password"
-                              : "Set a login password"
-                          }
-                          defaultValue={editParent?.details?.password || ""}
-                          required={!editParent}
-                        />
+                        <div className="parent-password-input-wrapper">
+                          <input
+                            name="password"
+                            type={showParentModalPassword ? "text" : "password"}
+                            placeholder={
+                              editParent
+                                ? "Leave blank to keep current password"
+                                : "Set a login password"
+                            }
+                            defaultValue={editParent?.details?.password || ""}
+                            required={!editParent}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowParentModalPassword(!showParentModalPassword)}
+                            className="parent-password-input-eye"
+                            title={showParentModalPassword ? "Hide Password" : "Show Password"}
+                          >
+                            {showParentModalPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -544,10 +556,24 @@ const Parents = () => {
                     {selectedParent.details.loginId || "Not Assigned"}
                   </span>
                   <strong>Password:</strong>
-                  <span>
-                    {selectedParent.details.password
-                      ? "••••••••"
-                      : "Not Assigned"}
+                  <span className="parent-detail-password-wrapper">
+                    {selectedParent.details.password ? (
+                      <>
+                        <span className="parent-detail-password-text">
+                          {showDetailPassword ? selectedParent.details.password : "••••••••"}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setShowDetailPassword((prev) => !prev)}
+                          className="parent-password-toggle-btn"
+                          title={showDetailPassword ? "Hide Password" : "Show Password"}
+                        >
+                          {showDetailPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                        </button>
+                      </>
+                    ) : (
+                      <span className="parent-detail-empty">Not Assigned</span>
+                    )}
                   </span>
                 </div>
               </div>

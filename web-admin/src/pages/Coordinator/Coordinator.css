@@ -479,6 +479,75 @@
 }
 
 /* ============================================================
+   Password Display & Input Toggle
+   ============================================================ */
+.coord-detail-password-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.coord-detail-password-text {
+  font-weight: 600;
+  color: var(--coord-text-main);
+  letter-spacing: 0.02em;
+}
+
+.coord-password-toggle-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 3px 6px;
+  color: var(--coord-text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.coord-password-toggle-btn:hover {
+  color: var(--coord-accent);
+  background: var(--coord-accent-light);
+}
+
+.coord-detail-empty {
+  color: var(--coord-text-muted);
+  font-style: italic;
+}
+
+.coord-password-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.coord-password-input-wrapper input {
+  padding-right: 38px !important;
+  width: 100%;
+}
+
+.coord-password-input-eye {
+  position: absolute;
+  right: 10px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--coord-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 4px;
+  transition: color 0.15s ease;
+}
+
+.coord-password-input-eye:hover {
+  color: var(--coord-accent);
+}
+
+/* ============================================================
    Responsive
    ============================================================ */
 @media (max-width: 640px) {

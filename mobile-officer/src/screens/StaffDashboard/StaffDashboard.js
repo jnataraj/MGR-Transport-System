@@ -544,6 +544,11 @@ export default function StaffDashboard({ dashboard }) {
                 <View style={{ flexDirection: "row", alignItems: "center" }}><Upload size={15} color="#FFFFFF" strokeWidth={2.1} /><Text style={{ color: "#fff", fontWeight: "700", fontSize: 13, marginLeft: 6 }}>Upload QR Image Instead</Text></View>
               </TouchableOpacity>
             )}
+            <TouchableOpacity
+              style={styles.cameraCancelBtn}
+              onPress={() => setIsCameraOpen(false)}>
+              <Text style={styles.cameraCancelText}>CANCEL</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>

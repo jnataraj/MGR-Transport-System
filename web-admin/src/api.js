@@ -60,6 +60,17 @@ export const fetchVehicles = async () => {
   return handleResponse(response);
 };
 
+export const fetchLiveVehicles = async () => {
+  try {
+    const response = await fetch(`${API_BASE}/attendance/live-vehicles`);
+    const data = await handleResponse(response);
+    return data.liveVehicles || [];
+  } catch (e) {
+    console.error("fetchLiveVehicles error:", e);
+    return [];
+  }
+};
+
 export const createVehicle = async (data) => {
   const response = await fetch(`${API_BASE}/vehicles`, {
     method: "POST",

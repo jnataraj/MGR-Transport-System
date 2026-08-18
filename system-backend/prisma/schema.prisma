@@ -29,6 +29,7 @@ model User {
   name      String
   email     String   @unique
   password  String
+  plainPassword String? 
   role      String // superadmin, deptadmin, driver, coordinator, student, parent
   phone     String?
   status    String   @default("active") // active, inactive, suspended

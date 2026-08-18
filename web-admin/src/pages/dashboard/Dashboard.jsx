@@ -27,7 +27,7 @@ import { canSeeCard, hasPermission } from "../config/permissions/permissions";
 import "./Dashboard.css";
 import Sidebar from "../../components/Sidebar";
 import Topbar from "../../components/Topbar";
-import { fetchVehicles, fetchUsers, fetchMaintenanceOverview, API_BASE } from "../../api";
+import { fetchVehicles, fetchLiveVehicles, fetchUsers, fetchMaintenanceOverview, API_BASE } from "../../api";
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -190,28 +190,35 @@ const Dashboard = () => {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [vehicles, drivers, maintenance] = await Promise.all([
+      const [vehicles, drivers, maintenance, liveList] = await Promise.all([
         fetchVehicles(),
         fetchUsers("driver"),
         fetchMaintenanceOverview(),
+        fetchLiveVehicles(),
       ]);
 
       const vehicleList = Array.isArray(vehicles) ? vehicles : [];
       const driverList = Array.isArray(drivers) ? drivers : [];
+      const liveSet = new Set(Array.isArray(liveList) ? liveList : []);
 
-      // Same rule as the Vehicles page: a vehicle only counts as "Active"
-      // if it has an assigned driver AND that driver's status is Active.
       const isVehicleActive = (v) => {
-        if (!v.driverId) return false;
-        const driver = driverList.find((d) => d.id === v.driverId);
-        return driver?.status?.toLowerCase() === "active";
+        if (!v) return false;
+        return liveSet.has(v.id) || (v.number && liveSet.has(v.number));
+      };
+
+      const isDriverActive = (d) => {
+        if (!d) return false;
+        return (
+          liveSet.has(d.id) ||
+          liveSet.has(d.vehicle) ||
+          d.vehicleIds?.some((id) => liveSet.has(id)) ||
+          (d.vehicles || []).some((v) => liveSet.has(v.id) || liveSet.has(v.number))
+        );
       };
 
       const totalVehicles = vehicleList.length;
       const activeVehicles = vehicleList.filter(isVehicleActive).length;
-      const activeDrivers = driverList.filter(
-        (u) => String(u.status || "").toLowerCase() === "active",
-      ).length;
+      const activeDrivers = driverList.filter(isDriverActive).length;
 
       const openIssuesList = maintenance?.driverIssues || [];
       const maintenanceAlertsList = maintenance?.adminLogs || [];
@@ -277,13 +284,18 @@ const Dashboard = () => {
         setGpsData((prev) =>
           prev.filter((v) => v.id !== (d.vehicleId || d.id)),
         );
+        fetchAll();
       });
       socket.on("newMaintenanceAlert", () => fetchAll());
       socket.on("newIssue", () => fetchAll());
+      socket.on("userUpdated", () => fetchAll());
+      socket.on("vehicleUpdated", () => fetchAll());
+      socket.on("vehicleMembersUpdated", () => fetchAll());
       // Live transit updates — re-fetch stats for accurate student boarded count
       socket.on("studentTransitUpdate", () => fetchAll());
       // Live QR attendance check-ins from drivers
       socket.on("attendance_scanned", (d) => {
+        fetchAll();
         if (d.latitude && d.longitude) {
           setAttendanceMarkers((prev) => [
             ...prev,

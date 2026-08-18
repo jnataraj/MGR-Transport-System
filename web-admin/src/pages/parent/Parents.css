@@ -550,6 +550,75 @@
 }
 
 /* ============================================================
+   Password Display & Input Toggle
+   ============================================================ */
+.parent-detail-password-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.parent-detail-password-text {
+  font-weight: 600;
+  color: var(--parent-text-main);
+  letter-spacing: 0.02em;
+}
+
+.parent-password-toggle-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 3px 6px;
+  color: var(--parent-text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.parent-password-toggle-btn:hover {
+  color: var(--parent-accent);
+  background: var(--parent-accent-light);
+}
+
+.parent-detail-empty {
+  color: var(--parent-text-muted);
+  font-style: italic;
+}
+
+.parent-password-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.parent-password-input-wrapper input {
+  padding-right: 38px !important;
+  width: 100%;
+}
+
+.parent-password-input-eye {
+  position: absolute;
+  right: 10px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--parent-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 4px;
+  transition: color 0.15s ease;
+}
+
+.parent-password-input-eye:hover {
+  color: var(--parent-accent);
+}
+
+/* ============================================================
    Responsive
    ============================================================ */
 @media (max-width: 640px) {
