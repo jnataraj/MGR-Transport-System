@@ -167,11 +167,11 @@ export default function Maintenance() {
 
                         <div className="maintenance-subheader">
                             <div>
-                                <h2>Maintenance &amp; Issues</h2>
-                                <p className="subtitle">
+                                <h2></h2>
+                                {/* <p className="subtitle">
                                     {overview.summary.openCount} open issues ·{" "}
                                     {overview.summary.criticalCount} critical
-                                </p>
+                                </p> */}
                             </div>
                             <button className="btn btn-primary" onClick={() => openDialog()}>
                                 + Create Maintenance Log

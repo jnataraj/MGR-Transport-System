@@ -29,6 +29,10 @@ router.post("/push-token", authMiddleware.verifyToken, notificationController.sa
 // Admin send notification
 router.post("/send", authMiddleware.verifyToken, notificationController.sendNotification);
 
+// Route alerts / notifications breakdown
+router.get("/route-alerts", notificationController.getRouteAlerts);
+router.post("/route-alerts", notificationController.createRouteAlert);
+
 // Get notifications for logged-in user
 router.get("/", authMiddleware.verifyToken, notificationController.getUserNotifications);
 

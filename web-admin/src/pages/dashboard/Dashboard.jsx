@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useContext } from "react";
+import { useState, useEffect, useCallback, useContext, useMemo } from "react";
 import {
   BusFront,
   UserCog,
@@ -27,7 +27,7 @@ import { canSeeCard, hasPermission } from "../config/permissions/permissions";
 import "./Dashboard.css";
 import Sidebar from "../../components/Sidebar";
 import Topbar from "../../components/Topbar";
-import { fetchVehicles, fetchLiveVehicles, fetchUsers, fetchMaintenanceOverview, fetchDashboardBoardingSummary, API_BASE } from "../../api";
+import { fetchVehicles, fetchLiveVehicles, fetchUsers, fetchMaintenanceOverview, fetchDashboardBoardingSummary, fetchRouteAlerts, createRouteAlert, API_BASE } from "../../api";
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -146,7 +146,7 @@ const StatCard = ({ icon, label, value, sub, color, bg, onClick, pulse }) => (
 const Dashboard = () => {
   // ── State ──
   const [stats, setStats] = useState(null);
-  const [alertBreak] = useState(null);
+  const [alertBreak, setAlertBreak] = useState(null);
   const [zones, setZones] = useState([]);
   const [zoneBoarded, setZoneBoarded] = useState({ boarded: 0, total: 0 });
   const [loading, setLoading] = useState(true);
@@ -155,6 +155,10 @@ const Dashboard = () => {
   const [liveTransit, setLiveTransit] = useState({ inTransit: 0, dropped: 0 });
   const [activeHalts, setActiveHalts] = useState([]);
   const { user } = useContext(AuthContext);
+  const [vehiclesList, setVehiclesList] = useState([]);
+  const [filterZone, setFilterZone] = useState("All");
+  const [filterRoute, setFilterRoute] = useState("All");
+  const [filterVehicle, setFilterVehicle] = useState("All");
 
   // Modals
   const [modal, setModal] = useState(null); // 'vehicles'|'drivers'|'issues'|'alerts'|'students'|'notify'
@@ -168,11 +172,12 @@ const Dashboard = () => {
   // Notification modal form
   const [notiForm, setNotiForm] = useState({
     route: "",
-    type: "Bus Cancellation",
+    type: "RouteChange",
     from: "",
     to: "",
     message: "",
   });
+  const [notiSending, setNotiSending] = useState(false);
 
   const [gpsData, setGpsData] = useState([]);
   const [attendanceMarkers, setAttendanceMarkers] = useState([]);
@@ -190,15 +195,17 @@ const Dashboard = () => {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [vehicles, drivers, maintenance, liveList, boardingSummary] = await Promise.all([
-        fetchVehicles(),
-        fetchUsers("driver"),
-        fetchMaintenanceOverview(),
-        fetchLiveVehicles(),
-        fetchDashboardBoardingSummary(),
+      const [vehicles, drivers, maintenance, liveList, boardingSummary, alertData] = await Promise.all([
+        fetchVehicles().catch(() => []),
+        fetchUsers("driver").catch(() => []),
+        fetchMaintenanceOverview().catch(() => ({})),
+        fetchLiveVehicles().catch(() => []),
+        fetchDashboardBoardingSummary().catch(() => ({ boarded: 0, total: 0, zones: [] })),
+        fetchRouteAlerts({ today: true }).catch(() => ({ success: true, routeAlerts: [], totals: { total: 0, route: 0, driver: 0, admin: 0 } })),
       ]);
 
       const vehicleList = Array.isArray(vehicles) ? vehicles : [];
+      setVehiclesList(vehicleList);
       const driverList = Array.isArray(drivers) ? drivers : [];
       const liveSet = new Set(Array.isArray(liveList) ? liveList : []);
 
@@ -234,6 +241,12 @@ const Dashboard = () => {
         openIssuesList,
         maintenanceAlertsList,
       });
+
+      if (alertData && alertData.success !== false) {
+        setAlertBreak(alertData);
+      } else {
+        setAlertBreak({ routeAlerts: [], totals: { total: 0, route: 0, driver: 0, admin: 0 } });
+      }
 
       // ── Boarding summary (Students Boarded Today + Zone Attendance) ──────────
       if (boardingSummary && boardingSummary.success !== false) {
@@ -302,6 +315,8 @@ const Dashboard = () => {
       socket.on("userUpdated", () => fetchAll());
       socket.on("vehicleUpdated", () => fetchAll());
       socket.on("vehicleMembersUpdated", () => fetchAll());
+      socket.on("new_route_alert", () => fetchAll());
+      socket.on("new_notification", () => fetchAll());
       // Live transit updates — re-fetch stats for accurate student boarded count
       socket.on("studentTransitUpdate", () => fetchAll());
       // Live QR attendance check-ins from drivers
@@ -376,12 +391,95 @@ const Dashboard = () => {
   const issuesList = stats
     ? [...(stats.openIssuesList || []), ...(stats.maintenanceAlertsList || [])]
     : [];
-  const alertsToday = alertBreak ? alertBreak.totals.total : 0;
   const routeAlerts = alertBreak?.routeAlerts || [];
-  const todayRouteTabFiltered =
-    routeTab === "All"
-      ? routeAlerts
-      : routeAlerts.filter((r) => r.notificationType === routeTab);
+  const alertsToday = routeAlerts.length;
+
+  const matchesRouteTab = (notificationType, tab) => {
+    if (tab === "All") return true;
+    if (!notificationType) return false;
+    const normType = String(notificationType).toLowerCase().replace(/[\s_\-()]/g, "");
+    const normTab = String(tab).toLowerCase().replace(/[\s_\-()]/g, "");
+
+    if (normTab === "routechange") {
+      return (
+        normType.includes("routechange") ||
+        normType.includes("change") ||
+        normType.includes("diversion") ||
+        normType.includes("reassign")
+      );
+    }
+    if (normTab === "delayeddeparture") {
+      return (
+        normType.includes("delayeddeparture") ||
+        normType.includes("delay") ||
+        normType.includes("routedelayed") ||
+        normType.includes("late")
+      );
+    }
+    if (normTab === "closure") {
+      return (
+        normType.includes("closure") ||
+        normType.includes("cancel") ||
+        normType.includes("routecancelled") ||
+        normType.includes("shutdown") ||
+        normType.includes("cancellation")
+      );
+    }
+    if (normTab === "emergency") {
+      return (
+        normType.includes("emergency") ||
+        normType.includes("sos") ||
+        normType.includes("broadcast")
+      );
+    }
+    return normType === normTab;
+  };
+
+  const todayRouteTabFiltered = routeAlerts.filter((r) =>
+    matchesRouteTab(r.notificationType, routeTab)
+  );
+
+  const vehicleByKey = useMemo(() => {
+    const map = {};
+    vehiclesList.forEach((v) => {
+      if (v.id) map[v.id] = v;
+      if (v.number) map[v.number] = v;
+    });
+    return map;
+  }, [vehiclesList]);
+
+  const routeOptions = useMemo(() => {
+    const set = new Set(vehiclesList.map((v) => v.route).filter(Boolean));
+    return Array.from(set).sort();
+  }, [vehiclesList]);
+
+  const zoneOptions = useMemo(() => zones.map((z) => z.zone), [zones]);
+
+  const vehicleOptions = useMemo(() => {
+    return vehiclesList.map((v) => v.number || v.id).filter(Boolean).sort();
+  }, [vehiclesList]);
+
+  const filteredGpsData = useMemo(() => {
+    return gpsData.filter((v) => {
+      const info = vehicleByKey[v.id];
+
+      if (filterVehicle !== "All") {
+        const displayKey = info?.number || info?.id || v.id;
+        if (displayKey !== filterVehicle) return false;
+      }
+
+      if (filterRoute !== "All" && info?.route !== filterRoute) return false;
+
+      if (filterZone !== "All") {
+        const zoneEntry = zones.find((z) => z.zone === filterZone);
+        const inZone = zoneEntry?.vehicles?.some(
+          (zv) => zv === v.id || zv?.id === v.id || zv?.number === v.id
+        );
+        if (!inZone) return false;
+      }
+      return true;
+    });
+  }, [gpsData, vehicleByKey, filterVehicle, filterRoute, filterZone, zones]);
 
   /* ── colour helpers for zone bars ── */
   const zoneColor = (i) => ZONE_COLORS[i % ZONE_COLORS.length];
@@ -537,7 +635,7 @@ const Dashboard = () => {
           {[
             {
               label: "Route Alerts",
-              val: alertBreak?.totals?.route || 0,
+              val: routeAlerts.length,
               color: "#B91C1C",
               bg: "#FEF2F2",
               icon: <Route size={15} />,
@@ -600,7 +698,7 @@ const Dashboard = () => {
               🗺 Route Alerts (Coordinator/Admin)
             </div>
             {renderList(
-              alertBreak?.routeAlerts || [],
+              routeAlerts,
               "No route alerts today ✅",
               (r) => (
                 <div key={r.id} className="db-alert-row db-alert-row--route">
@@ -614,9 +712,9 @@ const Dashboard = () => {
                     {r.customMessage || "—"}
                   </div>
                   <div className="db-issue-meta db-issue-meta--top4">
-                    📅 {r.effectiveDate} {r.effectiveTime} &nbsp;|&nbsp; 🕐{" "}
-                    {fmt(r.createdAt)} &nbsp;|&nbsp; 👥 {r.totalStudents}s{" "}
-                    {r.totalParents}p
+                    📅 {r.effectiveDate} {r.effectiveTime || ""} &nbsp;|&nbsp; 🕐{" "}
+                    {fmt(r.createdAt)} &nbsp;|&nbsp; 👥 {r.totalStudents ?? 0}s{" "}
+                    {r.totalParents ?? 0}p
                   </div>
                 </div>
               ),
@@ -748,6 +846,42 @@ const Dashboard = () => {
     </Modal>
   );
 
+  const handleSendRouteNotification = async (e) => {
+    e.preventDefault();
+    if (!notiForm.message.trim()) {
+      alert("Please enter a notification message.");
+      return;
+    }
+
+    try {
+      setNotiSending(true);
+      await createRouteAlert({
+        routeName: notiForm.route || "All Zones (Tamil Nadu)",
+        notificationType: notiForm.type || "RouteChange",
+        effectiveDate: notiForm.from || undefined,
+        duration: notiForm.to ? `${notiForm.from} to ${notiForm.to}` : null,
+        customMessage: notiForm.message,
+        adminName: user?.name || "Super Admin",
+      });
+
+      alert("Route notification broadcasted successfully!");
+      setNotiForm({
+        route: "",
+        type: "RouteChange",
+        from: "",
+        to: "",
+        message: "",
+      });
+      setModal(null);
+      fetchAll();
+    } catch (err) {
+      console.error("Error creating route notification:", err);
+      alert(err.message || "Failed to broadcast notification.");
+    } finally {
+      setNotiSending(false);
+    }
+  };
+
   const renderNotifyModal = () => (
     <Modal
       title="Raise Route Notification"
@@ -755,7 +889,7 @@ const Dashboard = () => {
       onClose={() => setModal(null)}
       width={560}
     >
-      <div className="db-notify-form">
+      <form onSubmit={handleSendRouteNotification} className="db-notify-form">
         <div className="db-notify-grid-2">
           <div>
             <label className="db-notify-label">TARGET ROUTE / ZONE</label>
@@ -767,10 +901,14 @@ const Dashboard = () => {
               className="db-notify-select"
             >
               <option value="">All Zones (Tamil Nadu)</option>
-              <option>Chennai - Route 1</option>
-              <option>Chennai - Route 6 (TAMBARAM)</option>
-              <option>Arani - Route 1</option>
-              <option>Bangalore - Route 1</option>
+              {routeOptions.length > 0
+                ? routeOptions.map((r) => <option key={r} value={r}>{r}</option>)
+                : [
+                    "Chennai - Route 1",
+                    "Chennai - Route 6 (TAMBARAM)",
+                    "Arani - Route 1",
+                    "Bangalore - Route 1",
+                  ].map((r) => <option key={r} value={r}>{r}</option>)}
             </select>
           </div>
           <div>
@@ -782,14 +920,10 @@ const Dashboard = () => {
               }
               className="db-notify-select"
             >
-              {[
-                "Bus Cancellation",
-                "Delay (Road/Tech)",
-                "Vehicle Change (Maintenance)",
-                "Driver Reassignment",
-              ].map((t) => (
-                <option key={t}>{t}</option>
-              ))}
+              <option value="RouteChange">Route Change</option>
+              <option value="DelayedDeparture">Delayed Departure</option>
+              <option value="Closure">Closure / Cancellation</option>
+              <option value="Emergency">Emergency</option>
             </select>
           </div>
         </div>
@@ -826,18 +960,17 @@ const Dashboard = () => {
             }
             placeholder="Enter the official message for students and parents..."
             className="db-notify-textarea"
+            required
           />
         </div>
         <button
-          onClick={() => {
-            alert("Emergency Broadcast Sent!");
-            setModal(null);
-          }}
+          type="submit"
+          disabled={notiSending}
           className="db-notify-send-btn"
         >
-          📢 SEND NOTIFICATION TO ALL MEMBERS
+          {notiSending ? "BROADCASTING…" : "📢 SEND NOTIFICATION TO ALL MEMBERS"}
         </button>
-      </div>
+      </form>
     </Modal>
   );
 
@@ -1040,19 +1173,21 @@ const Dashboard = () => {
                         className="db-route-empty-icon"
                       />
                       <p className="db-route-empty-text">
-                        No {routeTab === "All" ? "" : routeTab} route alerts
+                        No {routeTab === "All" ? "" : `${routeTab.replace(/([A-Z])/g, " $1").trim()} `}route alerts
                         today.
                       </p>
                     </div>
                   ) : (
                     todayRouteTabFiltered.map((r) => {
-                      const typeColor =
-                        r.notificationType === "Closure" ||
-                          r.notificationType === "Emergency"
-                          ? "#EF4444"
-                          : r.notificationType === "DelayedDeparture"
-                            ? "#F59E0B"
-                            : "#3B82F6";
+                      const isRed =
+                        matchesRouteTab(r.notificationType, "Closure") ||
+                        matchesRouteTab(r.notificationType, "Emergency");
+                      const isYellow = matchesRouteTab(r.notificationType, "DelayedDeparture");
+                      const typeColor = isRed
+                        ? "#EF4444"
+                        : isYellow
+                          ? "#F59E0B"
+                          : "#3B82F6";
                       return (
                         <div
                           key={r.id}
@@ -1085,9 +1220,9 @@ const Dashboard = () => {
                           </p>
                           <div className="db-route-card-meta">
                             <Calendar size={11} /> {r.effectiveDate}{" "}
-                            {r.effectiveTime}
-                            &nbsp;|&nbsp; 👥 {r.totalStudents} students ·{" "}
-                            {r.totalParents} parents
+                            {r.effectiveTime || ""}
+                            &nbsp;|&nbsp; 👥 {r.totalStudents ?? 0} students ·{" "}
+                            {r.totalParents ?? 0} parents
                           </div>
                         </div>
                       );
@@ -1223,7 +1358,8 @@ const Dashboard = () => {
                     attribution="&copy; OpenStreetMap contributors"
                     url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
                   />
-                  {gpsData.map((v) => {
+                  {/* {gpsData.map((v) => { */}
+                  {filteredGpsData.map((v) => {
                     const idle = now - v.lastMove > 5000;
                     const pinColor = idle ? "#EF4444" : "#10B981";
                     const icon = L.divIcon({
@@ -1273,106 +1409,50 @@ const Dashboard = () => {
                   })}
                 </MapContainer>
 
-                {/* Live Admin Alerts Overlay */}
-                <div className="db-map-alerts" style={{
-                  position: "absolute",
-                  top: "10px",
-                  right: "10px",
-                  width: "280px",
-                  maxHeight: "350px",
-                  backgroundColor: "rgba(30, 41, 59, 0.95)",
-                  borderRadius: "12px",
-                  padding: "14px",
-                  color: "#fff",
-                  zIndex: 10,
-                  display: "flex",
-                  flexDirection: "column",
-                  boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.3)",
-                  border: "1px solid rgba(255, 255, 255, 0.1)",
-                  backdropFilter: "blur(4px)",
-                  overflow: "hidden"
-                }}>
-                  <h3 style={{
-                    fontSize: "12px",
-                    fontWeight: "900",
-                    letterSpacing: "0.05em",
-                    margin: "0 0 10px 0",
-                    color: "#3B82F6",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "6px",
-                    borderBottom: "1px solid rgba(255,255,255,0.1)",
-                    paddingBottom: "8px"
-                  }}>
-                    <span style={{
-                      display: "inline-block",
-                      width: "8px",
-                      height: "8px",
-                      backgroundColor: "#EF4444",
-                      borderRadius: "50%",
-                      animation: "pulseDot 1.5s infinite"
-                    }}></span>
-                    ⚡ LIVE BOARDING ALERTS
-                  </h3>
-                  <div style={{
-                    flex: 1,
-                    overflowY: "auto",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "8px",
-                    paddingRight: "4px"
-                  }} className="vf-hide-scrollbar">
-                    {liveAlerts.length === 0 ? (
-                      <div style={{
-                        fontSize: "11px",
-                        color: "#94A3B8",
-                        textAlign: "center",
-                        padding: "20px 0"
-                      }}>
-                        Waiting for scan events…
-                      </div>
-                    ) : (
-                      liveAlerts.map((alert) => (
-                        <div key={alert.id} style={{
-                          backgroundColor: "rgba(255, 255, 255, 0.05)",
-                          padding: "8px 10px",
-                          borderRadius: "8px",
-                          borderLeft: "3px solid #3B82F6",
-                          animation: "scaleIn 0.3s ease-out"
-                        }}>
-                          <p style={{
-                            fontSize: "10px",
-                            fontWeight: "500",
-                            color: "#E2E8F0",
-                            margin: "0 0 4px 0",
-                            lineHeight: "1.4"
-                          }}>
-                            {alert.message}
-                          </p>
-                          <span style={{
-                            fontSize: "8px",
-                            color: "#64748B",
-                            fontWeight: "700"
-                          }}>
-                            {alert.time}
-                          </span>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-
                 {/* Map overlay filter */}
                 <div className="db-map-filter">
                   <h3 className="db-map-filter-title">🗂 Live Fleet Filter</h3>
-                  {["Zone", "Route", "Vehicle"].map((lbl) => (
-                    <div key={lbl} className="db-map-filter-field">
-                      <label className="db-map-filter-label">{lbl}</label>
-                      <select className="db-map-filter-select">
-                        <option>All {lbl}s</option>
-                      </select>
-                    </div>
-                  ))}
+                  {/* <div className="db-map-filter-field">
+                    <label className="db-map-filter-label">Zone</label>
+                    <select
+                      className="db-map-filter-select"
+                      value={filterZone}
+                      onChange={(e) => setFilterZone(e.target.value)}
+                    >
+                      <option value="All">All Zones</option>
+                      {zoneOptions.map((z) => (
+                        <option key={z} value={z}>{z}</option>
+                      ))}
+                    </select>
+                  </div> */}
+
+                  <div className="db-map-filter-field">
+                    <label className="db-map-filter-label">Route</label>
+                    <select
+                      className="db-map-filter-select"
+                      value={filterRoute}
+                      onChange={(e) => setFilterRoute(e.target.value)}
+                    >
+                      <option value="All">All Routes</option>
+                      {routeOptions.map((r) => (
+                        <option key={r} value={r}>{r}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="db-map-filter-field">
+                    <label className="db-map-filter-label">Vehicle</label>
+                    <select
+                      className="db-map-filter-select"
+                      value={filterVehicle}
+                      onChange={(e) => setFilterVehicle(e.target.value)}
+                    >
+                      <option value="All">All Vehicles</option>
+                      {vehicleOptions.map((v) => (
+                        <option key={v} value={v}>{v}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
               </div>
             </div>

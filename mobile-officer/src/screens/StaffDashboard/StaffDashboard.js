@@ -558,9 +558,6 @@ export default function StaffDashboard({ dashboard }) {
         <View style={styles.modalOverlay}>
           <View style={styles.issueCard}>
             <Text style={styles.modalTitle}>Report Issue</Text>
-            <Text style={{ fontSize: 12, color: "#6B7280", marginTop: -14, marginBottom: 16 }}>
-              Select a category below
-            </Text>
             <View style={styles.issueGrid}>
               <IssueActionTile
                 icon={CarFront}

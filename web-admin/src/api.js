@@ -354,6 +354,25 @@ export const fetchDashboardBoardingSummary = async () => {
   }
 };
 
+export const fetchRouteAlerts = async (params = {}) => {
+  try {
+    const url = `${API_BASE}/notifications/route-alerts${buildQuery(params)}`;
+    const response = await fetch(url);
+    return handleResponse(response);
+  } catch (e) {
+    console.error("fetchRouteAlerts error:", e);
+    return { success: false, routeAlerts: [], totals: { total: 0, route: 0, driver: 0, admin: 0 } };
+  }
+};
+
+export const createRouteAlert = async (data) => {
+  const response = await fetch(`${API_BASE}/notifications/route-alerts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  return handleResponse(response);
+};
 
 export default {
   socket,
@@ -376,6 +395,8 @@ export default {
   fetchNotifications,
   sendNotification,
   markNotificationRead,
+  fetchRouteAlerts,
+  createRouteAlert,
   fetchAdminSections,
   createAdminSection,
   updateAdminSection,

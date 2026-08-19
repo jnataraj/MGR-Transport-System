@@ -571,7 +571,7 @@ export const styles = StyleSheet.create({
     padding: 30,
     alignItems: "center",
   },
-  modalTitle: { fontSize: 18, fontWeight: "900", color: "#1F2937" },
+  modalTitle: { fontSize: 18, fontWeight: "900", color: "#1F2937", marginBottom: 15 },
   issueGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
