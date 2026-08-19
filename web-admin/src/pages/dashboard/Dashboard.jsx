@@ -27,7 +27,7 @@ import { canSeeCard, hasPermission } from "../config/permissions/permissions";
 import "./Dashboard.css";
 import Sidebar from "../../components/Sidebar";
 import Topbar from "../../components/Topbar";
-import { fetchVehicles, fetchLiveVehicles, fetchUsers, fetchMaintenanceOverview, API_BASE } from "../../api";
+import { fetchVehicles, fetchLiveVehicles, fetchUsers, fetchMaintenanceOverview, fetchDashboardBoardingSummary, API_BASE } from "../../api";
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -147,8 +147,8 @@ const Dashboard = () => {
   // ── State ──
   const [stats, setStats] = useState(null);
   const [alertBreak] = useState(null);
-  const [zones] = useState([]);
-  const [zoneBoarded] = useState({ boarded: 0, total: 0 });
+  const [zones, setZones] = useState([]);
+  const [zoneBoarded, setZoneBoarded] = useState({ boarded: 0, total: 0 });
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState(null);
   // Live transit + halt indicators
@@ -190,11 +190,12 @@ const Dashboard = () => {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [vehicles, drivers, maintenance, liveList] = await Promise.all([
+      const [vehicles, drivers, maintenance, liveList, boardingSummary] = await Promise.all([
         fetchVehicles(),
         fetchUsers("driver"),
         fetchMaintenanceOverview(),
         fetchLiveVehicles(),
+        fetchDashboardBoardingSummary(),
       ]);
 
       const vehicleList = Array.isArray(vehicles) ? vehicles : [];
@@ -233,6 +234,16 @@ const Dashboard = () => {
         openIssuesList,
         maintenanceAlertsList,
       });
+
+      // ── Boarding summary (Students Boarded Today + Zone Attendance) ──────────
+      if (boardingSummary && boardingSummary.success !== false) {
+        setZoneBoarded({
+          boarded: boardingSummary.boarded ?? 0,
+          total: boardingSummary.total ?? 0,
+        });
+        setZones(Array.isArray(boardingSummary.zones) ? boardingSummary.zones : []);
+      }
+
       setLastRefresh(new Date());
     } catch (e) {
       console.error("Dashboard fetch error", e);
@@ -705,9 +716,9 @@ const Dashboard = () => {
           <div className="db-students-summary-label">Total Assigned</div>
         </div>
       </div>
-      <div className="db-zone-heading">Zone-wise Attendance Breakdown</div>
+      <div className="db-zone-heading">Route-wise Attendance Breakdown</div>
       {zones.length === 0 ? (
-        <div className="db-zone-empty">No zone data available</div>
+        <div className="db-zone-empty">No Route data available</div>
       ) : (
         zones.map((z, i) => (
           <div key={z.zone} className="db-zone-row">

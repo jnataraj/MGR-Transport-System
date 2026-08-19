@@ -121,32 +121,34 @@ const Drivers = () => {
     return () => window.clearTimeout(timeoutId);
   }, [loadDrivers]);
 
-  // useEffect(() => {
-  //   console.log("Selected Staff:", selectedStaff);
-  // }, [selectedStaff]);
+  const formatDriver = (d) => {
+    const rawImage = d.image || d.details?.image || null;   // the REAL stored value
+    const image = rawImage || `https://i.pravatar.cc/150?u=${d.id}`; // display-only fallback
 
-  const formatDriver = (d) => ({
-    id: d.id,
-    name: d.name || "Unnamed",
-    phone: d.phone || "",
-    vehicle: d.vehicle || "Not Assigned",
-    vehicleIds: d.vehicleIds || (d.vehicles ? d.vehicles.map((v) => v.id) : []),
-    // status: d.status || "Active",
-    status: d.status || "Offline",
-    details: {
-      employeeId: d.employeeId || d.workId || d.details?.employeeId || (d.id ? d.id.toString().slice(-8).toUpperCase() : "N/A"),
-      email: d.email || d.details?.email || d.loginId || "",
-      licenseNumber: d.licenseNumber || d.license || d.details?.licenseNumber || "N/A",
-      licenseExpiry: d.licenseExpiry || d.details?.licenseExpiry || "N/A",
-      experience: d.experience || d.details?.experience || "N/A",
-      address: d.address || d.homeAddress || d.details?.address || "N/A",
-      image: d.image || d.details?.image || `https://i.pravatar.cc/150?u=${d.id}`,
-      staffType: d.staffType || d.details?.staffType || "Driver",
-      loginId: d.loginId || d.email || d.details?.loginId || "",
-      password: d.password || d.plainPassword || d.details?.password || d.details?.plainPassword || "",
-      shiftData: d.shiftData || d.details?.shiftData || {},
-    },
-  });
+    return {
+      id: d.id,
+      name: d.name || "Unnamed",
+      phone: d.phone || "",
+      vehicle: d.vehicle || "Not Assigned",
+      vehicleIds: d.vehicleIds || (d.vehicles ? d.vehicles.map((v) => v.id) : []),
+      status: d.status || "Offline",
+      rawImage,
+      details: {
+        employeeId: d.employeeId || d.workId || d.details?.employeeId || (d.id ? d.id.toString().slice(-8).toUpperCase() : "N/A"),
+        email: d.email || d.details?.email || d.loginId || "",
+        licenseNumber: d.licenseNumber || d.license || d.details?.licenseNumber || "N/A",
+        licenseExpiry: d.licenseExpiry || d.details?.licenseExpiry || "N/A",
+        experience: d.experience || d.details?.experience || "N/A",
+        address: d.address || d.homeAddress || d.details?.address || "N/A",
+        image,
+        rawImage,
+        staffType: d.staffType || d.details?.staffType || "Driver",
+        loginId: d.loginId || d.email || d.details?.loginId || "",
+        password: d.password || d.plainPassword || d.details?.password || d.details?.plainPassword || "",
+        shiftData: d.shiftData || d.details?.shiftData || {},
+      },
+    };
+  };
 
   const handleSave = async (driverData) => {
     try {
@@ -540,8 +542,7 @@ const DriverForm = ({ driver, onSave, onCancel }) => {
         loginId: driver.details?.loginId || "",
         password: driver.password || driver.details?.password || "",
       });
-      // setImagePreview(driver.details?.image?.startsWith("data:") ? driver.details.image : "");
-      setImagePreview(driver.details?.image || "");
+      setImagePreview(driver.details?.rawImage || driver.rawImage || "");
       setImageError("");
     } else {
       setFormData(emptyData);

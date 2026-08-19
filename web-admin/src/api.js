@@ -344,6 +344,16 @@ export const updateSystemSettings = async (data) => {
   return handleResponse(response);
 };
 
+export const fetchDashboardBoardingSummary = async () => {
+  try {
+    const response = await fetch(`${API_BASE}/attendance/dashboard-summary`);
+    return handleResponse(response);
+  } catch (e) {
+    console.error("fetchDashboardBoardingSummary error:", e);
+    return { boarded: 0, total: 0, zones: [] };
+  }
+};
+
 
 export default {
   socket,

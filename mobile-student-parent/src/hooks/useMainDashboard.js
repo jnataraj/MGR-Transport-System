@@ -46,8 +46,11 @@ export default function useMainDashboard({ user, token, onLogout }) {
   const handleTabPress = useCallback((tab) => {
     setActiveTab(tab);
     if (tab === "settings") setSettingsVisible(true);
-    if (tab === "profile") setProfileVisible(true);
-  }, []);
+    if (tab === "profile") {
+      refreshProfile?.();
+      setProfileVisible(true);
+    }
+  }, [refreshProfile]);
 
   const openTravelHistory = useCallback(async () => {
     setTravelHistoryVisible(true);

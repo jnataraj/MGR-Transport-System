@@ -24,6 +24,7 @@ import BottomTabBar from "../components/BottomTabBar";
 import LiveBusTrackingModal from "../components/LiveBusTrackingModal";
 import * as ImagePicker from "expo-image-picker";
 import jsQR from "jsqr";
+import { ProfileAvatar, avatarStyles } from "../screens/dashboard/modals/ProfileModal";
 import {
   GraduationCap,
   MapPin,
@@ -3014,22 +3015,11 @@ export default function MainDashboard({ user, token, onLogout }) {
                 contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
                 showsVerticalScrollIndicator={false}
               >
-                {/* Header */}
-                <View style={{ alignItems: "center", marginBottom: 20 }}>
-                  <Text style={{ fontSize: 24, fontWeight: "900", color: "#0F172A" }}>
-                    {userName}
-                  </Text>
-                  <Text
-                    style={{
-                      fontSize: 11,
-                      fontWeight: "800",
-                      color: "#94A3B8",
-                      letterSpacing: 1,
-                      marginTop: 4,
-                    }}
-                  >
-                    {userRole.toUpperCase()} ACCOUNT
-                  </Text>
+                <View style={avatarStyles.heroCard}>
+                  <ProfileAvatar user={user} />
+                  <Text style={avatarStyles.heroName}>{user?.name || "—"}</Text>
+                  <Text style={avatarStyles.heroRole}>{user?.role ? `${user.role.toUpperCase()} ACCOUNT` : "ACCOUNT"}</Text>
+
                 </View>
 
                 {/* Personal Details Card */}

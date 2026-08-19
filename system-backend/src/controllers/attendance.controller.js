@@ -869,3 +869,88 @@ exports.getLiveVehicles = async (req, res) => {
     return res.status(500).json({ success: false, message: error.message });
   }
 };
+
+
+exports.getDashboardBoardingSummary = async (req, res) => {
+  try {
+    const now = new Date();
+    const startOfToday = new Date(now);
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const students = await prisma.user.findMany({
+      where: { role: "student" },
+      select: {
+        id: true,
+        studentAssignments: {
+          select: {
+            vehicleId: true,
+            vehicle: { select: { id: true, number: true, route: true } },
+          },
+        },
+      },
+    });
+
+    const todayScans = await prisma.attendance.findMany({
+      where: {
+        type: "student_scan",
+        scannedAt: { gte: startOfToday },
+      },
+      select: { userId: true },
+    });
+
+    const boardedStudentIds = new Set(todayScans.map((s) => s.userId));
+    const zoneMap = new Map();
+
+    const getOrCreate = (zoneName) => {
+      if (!zoneMap.has(zoneName)) {
+        zoneMap.set(zoneName, {
+          zone: zoneName,
+          assignedStudents: new Set(),
+          boardedStudents: new Set(),
+          vehicles: new Set(),
+        });
+      }
+      return zoneMap.get(zoneName);
+    };
+
+    const assignedStudentIds = new Set();
+    for (const student of students) {
+      const assignment = student.studentAssignments?.[0];
+      if (assignment?.vehicle) {
+        const zoneName = assignment.vehicle.route?.trim() || "Unassigned";
+        const entry = getOrCreate(zoneName);
+        entry.assignedStudents.add(student.id);
+        entry.vehicles.add(assignment.vehicle.number);
+        if (boardedStudentIds.has(student.id)) {
+          entry.boardedStudents.add(student.id);
+        }
+        assignedStudentIds.add(student.id);
+      }
+    }
+
+    const totalAssigned = assignedStudentIds.size;
+    const totalBoarded = boardedStudentIds.size;
+    const zones = Array.from(zoneMap.values())
+      .map((z) => ({
+        zone: z.zone,
+        assigned: z.assignedStudents.size,
+        present: z.boardedStudents.size,
+        percentage:
+          z.assignedStudents.size > 0
+            ? Math.round((z.boardedStudents.size / z.assignedStudents.size) * 100)
+            : 0,
+        vehicles: Array.from(z.vehicles),
+      }))
+      .sort((a, b) => a.zone.localeCompare(b.zone));
+
+    return res.status(200).json({
+      success: true,
+      boarded: totalBoarded,
+      total: totalAssigned,
+      zones,
+    });
+  } catch (error) {
+    console.error("getDashboardBoardingSummary Error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};

@@ -8,8 +8,9 @@ import {
   View,
   Image,
   StyleSheet,
+  Platform,
 } from "react-native";
-import styles from "../../../styles/modal.styles";
+import styles from "../styles/modal.styles";
 
 // ── Profile image avatar ───────────────────────────────────────────────────
 export const ProfileAvatar = ({ user }) => {
@@ -74,7 +75,7 @@ export default function ProfileModal({ visible, user, onClose }) {
           <View style={avatarStyles.heroCard}>
             <ProfileAvatar user={user} />
             <Text style={avatarStyles.heroName}>{user?.name || "—"}</Text>
-            <Text style={avatarStyles.heroRole}>STUDENT ACCOUNT12</Text>
+            <Text style={avatarStyles.heroRole}>STUDENT ACCOUNT</Text>
           </View>
 
           {/* ── Personal Details ─────────────────────────────────────── */}

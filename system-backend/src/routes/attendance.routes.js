@@ -15,6 +15,9 @@ router.get("/live-vehicles", attendanceController.getLiveVehicles);
 // GET /api/attendance/bus-location - Live GPS snapshot for student/parent map
 router.get("/bus-location", attendanceController.getBusLiveLocation);
 
+// GET /api/attendance/dashboard-summary - Boarding summary for admin dashboard (boarded + zones)
+router.get("/dashboard-summary", attendanceController.getDashboardBoardingSummary);
+
 // POST /api/attendance - Record QR scan attendance
 router.post("/", attendanceController.recordAttendance);
 

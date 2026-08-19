@@ -47,6 +47,7 @@ import logo from "../../../assets/logo.png";
 import BottomTabBar from "../../components/BottomTabBar";
 import { styles, profileStyles } from "../../styles/dashboard.styles";
 import { subModalStyles } from "../../styles/modal.styles";
+import { ProfileAvatar } from "../../components/ProfileModal";
 
 // ── Main-action definitions: icon, label, gate (capability key), colored accent ──
 const ACTION_DEFS = [
@@ -1933,9 +1934,7 @@ export default function StaffDashboard({ dashboard }) {
             >
               {/* Avatar + Header */}
               <View style={{ alignItems: "center", marginBottom: 20 }}>
-                <View style={profileStyles.avatarRing}>
-                  <Text style={{ fontSize: 40 }}>{caps.icon}</Text>
-                </View>
+                <ProfileAvatar user={user} />
                 <Text
                   style={{
                     fontSize: 22,

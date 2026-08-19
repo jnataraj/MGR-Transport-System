@@ -30,6 +30,7 @@ const Students = () => {
   const [showStudentModalPassword, setShowStudentModalPassword] = useState(false);
 
   const mapUserToRow = (user, extras = {}) => {
+    const rawImage = user.image || null;
     const image = user.image || `https://i.pravatar.cc/150?u=${user.id}`;
     return {
       id: user.id,
@@ -37,6 +38,7 @@ const Students = () => {
       dept: user.department || "N/A",
       email: user.email || "N/A",
       image,
+      rawImage,
       bus: user.vehicle || "Not Assigned",
       payment: user.paymentStatus || "Pending",
       details: {
@@ -56,7 +58,8 @@ const Students = () => {
         },
         loginId: user.loginId || user.email || "N/A",
         password: extras.password || user.password || user.plainPassword || "",
-        image,
+        // image,
+        image: rawImage,
       },
     };
   };
@@ -530,7 +533,7 @@ const Students = () => {
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setEditStudent(user);
-                                const existingImage = user.image || user.details?.image || "";
+                                const existingImage = user.rawImage || user.details?.image || "";
                                 setImagePreview(existingImage);
                                 setImageError("");
                                 setShowAddModal(true);
