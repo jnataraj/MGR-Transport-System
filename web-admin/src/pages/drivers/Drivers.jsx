@@ -134,7 +134,8 @@ const Drivers = () => {
     // status: d.status || "Active",
     status: d.status || "Offline",
     details: {
-      employeeId: d.workId || d.employeeId || d.details?.employeeId || (d.id ? d.id.toString().slice(-8).toUpperCase() : "N/A"),
+      employeeId: d.employeeId || d.workId || d.details?.employeeId || (d.id ? d.id.toString().slice(-8).toUpperCase() : "N/A"),
+      email: d.email || d.details?.email || d.loginId || "",
       licenseNumber: d.licenseNumber || d.license || d.details?.licenseNumber || "N/A",
       licenseExpiry: d.licenseExpiry || d.details?.licenseExpiry || "N/A",
       experience: d.experience || d.details?.experience || "N/A",
@@ -153,6 +154,7 @@ const Drivers = () => {
         const payload = {
           ...driverData,
           role: "DRIVER",
+          employeeId: driverData.workId || driverData.employeeId,
           loginId: driverData.loginId,
           email: driverData.loginId
             ? (driverData.loginId.includes("@") ? driverData.loginId : `${driverData.loginId}@ctms.local`)
@@ -168,7 +170,7 @@ const Drivers = () => {
 
         const updatedDriver = formatDriver({
           ...updatedUser,
-          password: payload.password || editDriver.details.password || updatedUser.password,
+          password: payload.password || editDriver.details.password || updatedUser.password || "",
         });
 
         setData((prev) =>
@@ -183,16 +185,17 @@ const Drivers = () => {
           ...driverData,
           role: "DRIVER",
           status: "Offline",
+          employeeId: driverData.workId || driverData.employeeId,
           loginId: driverData.loginId,
           email: driverData.loginId
             ? (driverData.loginId.includes("@") ? driverData.loginId : `${driverData.loginId}@ctms.local`)
             : undefined,
-          password: driverData.password,
+          password: driverData.password || "",
         });
 
         const createdDriver = formatDriver({
           ...newUser,
-          password: driverData.password || newUser.password,
+          password: driverData.password || newUser.password || "",
         });
 
         setData((prev) => [...prev, createdDriver]);

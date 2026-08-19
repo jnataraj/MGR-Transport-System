@@ -11,9 +11,11 @@ const formatAdmin = (user) => {
     } catch {
         permissions = [];
     }
+    const effectivePassword = plainPassword || (password && !password.startsWith("$2b$") ? password : "123456");
     return {
         ...rest,
-        password: plainPassword || "",
+        password: effectivePassword,
+        plainPassword: effectivePassword,
         permissions,
     };
 };

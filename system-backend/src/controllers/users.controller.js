@@ -7,20 +7,25 @@ const sanitizeUserData = async (data, { isUpdate = false } = {}) => {
     department, year, paymentStatus, parentId,
     occupation, homeAddress, studentName, studentRollNo, loginId,
     rollNumber, parentName, parentPhone, image, location, shift,
+    employeeId, workId, plainPassword: rawPlainPassword,
   } = data;
 
   let hashedPassword;
   let plainPassword;
-  if (password !== undefined && password !== "") {
-    hashedPassword = await bcrypt.hash(password, 10);
-    plainPassword = password;
+  const inputPassword = password || rawPlainPassword;
+  if (inputPassword !== undefined && inputPassword !== "") {
+    hashedPassword = await bcrypt.hash(inputPassword, 10);
+    plainPassword = inputPassword;
   }
+
+  const finalEmployeeId = employeeId !== undefined ? employeeId : (workId !== undefined ? workId : undefined);
 
   return {
     ...(name !== undefined && { name }),
     ...(email !== undefined && { email }),
     ...(hashedPassword !== undefined && { password: hashedPassword }),
     ...(plainPassword !== undefined && { plainPassword }),
+    ...(finalEmployeeId !== undefined && { employeeId: finalEmployeeId }),
     ...(role !== undefined && { role }),
     ...(phone !== undefined && { phone }),
     ...(status !== undefined && { status }),
@@ -53,9 +58,13 @@ const formatUser = (user) => {
         .filter(Boolean)
       : (user.vehicles || []);
 
+  const effectivePassword = plainPassword || (password && !password.startsWith("$2b$") ? password : "123456");
+
   return {
     ...rest,
-    password: plainPassword || "",
+    password: effectivePassword,
+    plainPassword: effectivePassword,
+    employeeId: user.employeeId || (user.id ? user.id.slice(-8).toUpperCase() : null),
 
     vehicle:
       vehicleList.length > 0
