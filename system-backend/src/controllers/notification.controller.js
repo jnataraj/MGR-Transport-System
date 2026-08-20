@@ -1,5 +1,10 @@
 const prisma = require("../prisma/prisma");
 const { triggerNotification } = require("../utils/notification");
+const {
+  getMissingAlerts,
+  getActiveMissingAlerts,
+  closeAlertById,
+} = require("../services/missingAlertService");
 
 // Save/Update user's Expo Push Token
 exports.savePushToken = async (req, res) => {
@@ -190,7 +195,7 @@ exports.getRouteAlerts = async (req, res) => {
       ];
     }
 
-    const [routeAlerts, driverIssuesToday, maintenanceAlertsToday] = await Promise.all([
+    const [routeAlerts, driverIssuesToday, maintenanceAlertsToday, missingAlertsToday] = await Promise.all([
       prisma.routeNotification.findMany({
         where,
         orderBy: { createdAt: "desc" },
@@ -203,6 +208,7 @@ exports.getRouteAlerts = async (req, res) => {
         where: { createdAt: { gte: startOfDay, lte: endOfDay } },
         orderBy: { createdAt: "desc" },
       }),
+      getMissingAlerts({ today: true }),
     ]);
 
     const formattedToday = now.toLocaleDateString("en-IN", {
@@ -211,16 +217,25 @@ exports.getRouteAlerts = async (req, res) => {
       year: "numeric",
     });
 
+    const totalAlertsCount =
+      routeAlerts.length +
+      driverIssuesToday.length +
+      maintenanceAlertsToday.length +
+      missingAlertsToday.length;
+
     return res.status(200).json({
       success: true,
       routeAlerts,
       driverIssues: driverIssuesToday,
       adminAlerts: maintenanceAlertsToday,
+      missingAlerts: missingAlertsToday,
       totals: {
-        total: routeAlerts.length,
+        total: totalAlertsCount,
         route: routeAlerts.length,
         driver: driverIssuesToday.length,
         admin: maintenanceAlertsToday.length,
+        missing: missingAlertsToday.length,
+        activeMissing: missingAlertsToday.filter((m) => m.status === "ACTIVE").length,
       },
       today: formattedToday,
     });
@@ -229,6 +244,62 @@ exports.getRouteAlerts = async (req, res) => {
     return res.status(500).json({ success: false, message: error.message, routeAlerts: [] });
   }
 };
+
+// GET /api/notifications/missing-alerts
+exports.fetchMissingAlerts = async (req, res) => {
+  try {
+    const { today = true, date, status, studentId, vehicleId, limit } = req.query;
+    const alerts = await getMissingAlerts({ today, date, status, studentId, vehicleId, limit });
+    return res.status(200).json({
+      success: true,
+      missingAlerts: alerts,
+      count: alerts.length,
+      activeCount: alerts.filter((a) => a.status === "ACTIVE").length,
+    });
+  } catch (error) {
+    console.error("fetchMissingAlerts Error:", error);
+    return res.status(500).json({ success: false, message: error.message, missingAlerts: [] });
+  }
+};
+
+// GET /api/notifications/missing-alerts/active
+exports.fetchActiveMissingAlerts = async (req, res) => {
+  try {
+    const activeAlerts = await getActiveMissingAlerts();
+    return res.status(200).json({
+      success: true,
+      activeAlerts,
+      count: activeAlerts.length,
+    });
+  } catch (error) {
+    console.error("fetchActiveMissingAlerts Error:", error);
+    return res.status(500).json({ success: false, message: error.message, activeAlerts: [] });
+  }
+};
+
+// PUT /api/notifications/missing-alerts/:id/resolve
+exports.resolveMissingAlert = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason = "Resolved by Admin" } = req.body;
+    const io = req.app.get("io");
+
+    const resolved = await closeAlertById(id, reason, io);
+    if (!resolved) {
+      return res.status(404).json({ success: false, message: "Alert not found or already closed" });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Missing alert resolved successfully",
+      alert: resolved,
+    });
+  } catch (error) {
+    console.error("resolveMissingAlert Error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 
 // POST /api/notifications/route-alerts
 exports.createRouteAlert = async (req, res) => {

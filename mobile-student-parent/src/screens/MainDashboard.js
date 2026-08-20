@@ -862,6 +862,99 @@ export default function MainDashboard({ user, token, onLogout }) {
     };
   }, [userRole, userId]);
 
+  // ── Student Continuous GPS Tracking during active transit journey ──
+  useEffect(() => {
+    let locationWatcher = null;
+    let locationInterval = null;
+
+    const isStudentInTransit =
+      userRole === "student" &&
+      (boardStatus === STAGE.TO_COLLEGE || boardStatus === STAGE.TO_HOME);
+
+    if (isStudentInTransit && gpsEnabled) {
+      const emitStudentLocation = (coords) => {
+        if (!coords) return;
+        const payload = {
+          studentId: userId,
+          studentName: user?.name,
+          studentRollNo: user?.rollNumber || user?.studentRollNo,
+          vehicleId: user?.vehicleId,
+          vehicleNumber: currentVehicleNumber || user?.vehicle,
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+          lat: coords.latitude,
+          lng: coords.longitude,
+          timestamp: new Date().toISOString(),
+        };
+
+        // Emit via real-time socket
+        socketRef.current?.emit("studentLocationUpdate", payload);
+
+        // Also ping REST endpoint as resilient fallback
+        fetch(`${API_BASE}/api/attendance/student-location`, {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify(payload),
+        }).catch(() => {});
+      };
+
+      (async () => {
+        try {
+          const loc = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+          if (loc?.coords) {
+            emitStudentLocation(loc.coords);
+          }
+        } catch (e) {
+          console.log("Initial student GPS error:", e.message);
+        }
+
+        try {
+          locationWatcher = await Location.watchPositionAsync(
+            {
+              accuracy: Location.Accuracy.High,
+              timeInterval: 5000,
+              distanceInterval: 5,
+            },
+            (loc) => {
+              if (loc?.coords) {
+                emitStudentLocation(loc.coords);
+              }
+            }
+          );
+        } catch (e) {
+          console.log("Student watchPositionAsync error, using interval fallback:", e.message);
+          locationInterval = setInterval(async () => {
+            try {
+              const loc = await Location.getCurrentPositionAsync({
+                accuracy: Location.Accuracy.Balanced,
+              });
+              if (loc?.coords) emitStudentLocation(loc.coords);
+            } catch {}
+          }, 8000);
+        }
+      })();
+    } else if (userRole === "student" && !isStudentInTransit) {
+      // Notify backend that student journey is completed / arrived
+      socketRef.current?.emit("studentTransitCompleted", {
+        studentId: userId,
+        reason:
+          boardStatus === STAGE.AT_COLLEGE
+            ? "Arrived at College"
+            : boardStatus === STAGE.AT_HOME
+            ? "Arrived at Home"
+            : "Attendance Closed",
+      });
+    }
+
+    return () => {
+      if (locationWatcher?.remove) locationWatcher.remove();
+      if (locationInterval) clearInterval(locationInterval);
+    };
+  }, [userRole, boardStatus, gpsEnabled, userId, currentVehicleNumber]);
+
+
   const viewLiveLocation = () => {
     setShowLiveMapModal(true);
   };

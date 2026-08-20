@@ -15,6 +15,7 @@ import {
   Wrench,
   Route,
   Car,
+  UserX,
 } from "lucide-react";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
@@ -27,7 +28,17 @@ import { canSeeCard, hasPermission } from "../config/permissions/permissions";
 import "./Dashboard.css";
 import Sidebar from "../../components/Sidebar";
 import Topbar from "../../components/Topbar";
-import { fetchVehicles, fetchLiveVehicles, fetchUsers, fetchMaintenanceOverview, fetchDashboardBoardingSummary, fetchRouteAlerts, createRouteAlert, API_BASE } from "../../api";
+import {
+  fetchVehicles,
+  fetchLiveVehicles,
+  fetchUsers,
+  fetchMaintenanceOverview,
+  fetchDashboardBoardingSummary,
+  fetchRouteAlerts,
+  fetchMissingAlerts,
+  createRouteAlert,
+  API_BASE,
+} from "../../api";
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -75,18 +86,26 @@ const PriBadge = ({ p }) => {
 const StatusBadge = ({ s }) => {
   const map = {
     open: ["#DC2626", "#FEE2E2"],
+    ACTIVE: ["#DC2626", "#FEE2E2"],
     resolved: ["#059669", "#D1FAE5"],
+    RESOLVED: ["#059669", "#D1FAE5"],
+    CLOSED: ["#475569", "#F1F5F9"],
     Pending: ["#D97706", "#FEF3C7"],
     Acknowledged: ["#2563EB", "#DBEAFE"],
     Resolved: ["#059669", "#D1FAE5"],
   };
   const [c, bg] = map[s] || ["#64748B", "#F1F5F9"];
+  const isPulse = s === "ACTIVE" || s === "open";
   return (
-    <span className="db-pill" style={{ background: bg, color: c }}>
-      {s}
+    <span
+      className={`db-pill ${isPulse ? "db-pill--pulse-red" : ""}`}
+      style={{ background: bg, color: c }}
+    >
+      {s === "ACTIVE" ? "🚨 ACTIVE MISSING" : s}
     </span>
   );
 };
+
 
 /* ── Modal wrapper ───────────────────────────────────────────────── */
 const Modal = ({ title, icon, onClose, children, width = 640 }) => (
@@ -182,6 +201,7 @@ const Dashboard = () => {
   const [gpsData, setGpsData] = useState([]);
   const [attendanceMarkers, setAttendanceMarkers] = useState([]);
   const [liveAlerts, setLiveAlerts] = useState([]);
+  const [missingAlerts, setMissingAlerts] = useState([]);
 
   // Ticking clock used to derive "idle" status during render without
   // calling Date.now() directly inside JSX (React purity rule)
@@ -201,7 +221,7 @@ const Dashboard = () => {
         fetchMaintenanceOverview().catch(() => ({})),
         fetchLiveVehicles().catch(() => []),
         fetchDashboardBoardingSummary().catch(() => ({ boarded: 0, total: 0, zones: [] })),
-        fetchRouteAlerts({ today: true }).catch(() => ({ success: true, routeAlerts: [], totals: { total: 0, route: 0, driver: 0, admin: 0 } })),
+        fetchRouteAlerts({ today: true }).catch(() => ({ success: true, routeAlerts: [], totals: { total: 0, route: 0, driver: 0, admin: 0, missing: 0 } })),
       ]);
 
       const vehicleList = Array.isArray(vehicles) ? vehicles : [];
@@ -244,8 +264,10 @@ const Dashboard = () => {
 
       if (alertData && alertData.success !== false) {
         setAlertBreak(alertData);
+        setMissingAlerts(alertData.missingAlerts || []);
       } else {
-        setAlertBreak({ routeAlerts: [], totals: { total: 0, route: 0, driver: 0, admin: 0 } });
+        setAlertBreak({ routeAlerts: [], totals: { total: 0, route: 0, driver: 0, admin: 0, missing: 0 } });
+        setMissingAlerts([]);
       }
 
       // ── Boarding summary (Students Boarded Today + Zone Attendance) ──────────
@@ -317,6 +339,41 @@ const Dashboard = () => {
       socket.on("vehicleMembersUpdated", () => fetchAll());
       socket.on("new_route_alert", () => fetchAll());
       socket.on("new_notification", () => fetchAll());
+      // Real-Time Student Missing Alerts
+      socket.on("student_missing_alert", (alert) => {
+        setMissingAlerts((prev) => {
+          const filtered = prev.filter((a) => a.id !== alert.id && a.studentId !== alert.studentId);
+          return [alert, ...filtered];
+        });
+        fetchAll();
+      });
+      socket.on("new_missing_alert", (alert) => {
+        setMissingAlerts((prev) => {
+          const filtered = prev.filter((a) => a.id !== alert.id && a.studentId !== alert.studentId);
+          return [alert, ...filtered];
+        });
+        fetchAll();
+      });
+      socket.on("student_missing_alert_resolved", (res) => {
+        setMissingAlerts((prev) =>
+          prev.map((a) =>
+            a.id === res.id || a.studentId === res.studentId
+              ? { ...a, status: "RESOLVED", resolvedReason: res.resolvedReason, resolvedAt: res.resolvedAt }
+              : a
+          )
+        );
+        fetchAll();
+      });
+      socket.on("missing_alert_closed", (res) => {
+        setMissingAlerts((prev) =>
+          prev.map((a) =>
+            a.id === res.id || a.studentId === res.studentId
+              ? { ...a, status: "RESOLVED", resolvedReason: res.resolvedReason, resolvedAt: res.resolvedAt }
+              : a
+          )
+        );
+        fetchAll();
+      });
       // Live transit updates — re-fetch stats for accurate student boarded count
       socket.on("studentTransitUpdate", () => fetchAll());
       // Live QR attendance check-ins from drivers
@@ -366,6 +423,7 @@ const Dashboard = () => {
       socket.on("initialHalts", (halts) => setActiveHalts(halts || []));
     });
   }, [fetchAll]);
+
 
   // Fetch today's transit summary for live indicator
   useEffect(() => {
@@ -592,15 +650,22 @@ const Dashboard = () => {
   );
 
   const renderAlertsModal = () => {
+    const activeMissingCount = missingAlerts.filter((m) => m.status === "ACTIVE").length;
     const tabs = [
       {
         key: "all",
-        label: `All (${alertBreak?.totals?.total || 0})`,
+        label: `All (${alertBreak?.totals?.total || (missingAlerts.length + routeAlerts.length + (alertBreak?.totals?.driver || 0) + (alertBreak?.totals?.admin || 0))})`,
         color: "#475569",
       },
       {
+        key: "missing",
+        label: `Student Missing (${missingAlerts.length})`,
+        color: "#DC2626",
+        badge: activeMissingCount > 0 ? `${activeMissingCount} ACTIVE` : null,
+      },
+      {
         key: "route",
-        label: `Route (${alertBreak?.totals?.route || 0})`,
+        label: `Route (${alertBreak?.totals?.route || routeAlerts.length})`,
         color: "#B91C1C",
       },
       {
@@ -628,17 +693,27 @@ const Dashboard = () => {
         title={`Alerts Raised — Today (${today})`}
         icon={<Bell size={18} color="#B91C1C" />}
         onClose={() => setModal(null)}
-        width={760}
+        width={780}
       >
         {/* Summary counters */}
-        <div className="db-summary-grid">
+        <div className="db-summary-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
           {[
+            {
+              label: "Student Missing",
+              val: missingAlerts.length,
+              activeText: activeMissingCount > 0 ? `${activeMissingCount} Active` : null,
+              color: "#DC2626",
+              bg: "#FEF2F2",
+              icon: <UserX size={15} />,
+              tabKey: "missing",
+            },
             {
               label: "Route Alerts",
               val: routeAlerts.length,
               color: "#B91C1C",
               bg: "#FEF2F2",
               icon: <Route size={15} />,
+              tabKey: "route",
             },
             {
               label: "Driver Issues",
@@ -646,6 +721,7 @@ const Dashboard = () => {
               color: "#D97706",
               bg: "#FFFBEB",
               icon: <Car size={15} />,
+              tabKey: "driver",
             },
             {
               label: "Maintenance Logs",
@@ -653,17 +729,24 @@ const Dashboard = () => {
               color: "#7C3AED",
               bg: "#F5F3FF",
               icon: <Wrench size={15} />,
+              tabKey: "admin",
             },
           ].map((c) => (
             <div
               key={c.label}
+              onClick={() => setAlertTab(c.tabKey)}
               className="db-summary-card"
-              style={{ background: c.bg, border: `1px solid ${c.color}20` }}
+              style={{ background: c.bg, border: `1px solid ${c.color}20`, cursor: "pointer" }}
             >
               <div style={{ color: c.color }}>{c.icon}</div>
               <div>
                 <div className="db-summary-value" style={{ color: c.color }}>
                   {c.val}
+                  {c.activeText && (
+                    <span style={{ fontSize: "0.65rem", marginLeft: 6, padding: "2px 6px", background: "#DC2626", color: "#fff", borderRadius: 10 }}>
+                      {c.activeText}
+                    </span>
+                  )}
                 </div>
                 <div className="db-summary-label">{c.label}</div>
               </div>
@@ -681,12 +764,130 @@ const Dashboard = () => {
               style={{
                 background: alertTab === t.key ? t.color : "#F1F5F9",
                 color: alertTab === t.key ? "#fff" : t.color,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
               }}
             >
               {t.label}
+              {t.badge && (
+                <span className="db-pill db-pill--solid-red" style={{ fontSize: "0.6rem", padding: "1px 5px" }}>
+                  {t.badge}
+                </span>
+              )}
             </button>
           ))}
         </div>
+
+        {/* Student Missing Alerts */}
+        {(alertTab === "all" || alertTab === "missing") && (
+          <section className="db-section-block">
+            <div
+              className="db-section-heading db-section-heading--sm"
+              style={{ color: "#DC2626", display: "flex", alignItems: "center", justifyContent: "space-between" }}
+            >
+              <span>🚨 Student Missing Alerts (Distance &gt; 10m from Driver)</span>
+              {activeMissingCount > 0 && (
+                <span className="db-pill db-pill--pulse-red">
+                  {activeMissingCount} ACTIVE
+                </span>
+              )}
+            </div>
+            {renderList(
+              missingAlerts,
+              "No student missing alerts today ✅",
+              (m) => {
+                const isActive = m.status === "ACTIVE";
+                const borderLeftColor = isActive ? "#DC2626" : "#64748B";
+                const bg = isActive ? "#FEF2F2" : "#F8FAFC";
+                return (
+                  <div
+                    key={m.id}
+                    className="db-missing-alert-card"
+                    style={{
+                      borderLeft: `5px solid ${borderLeftColor}`,
+                      background: bg,
+                      border: `1px solid ${borderLeftColor}30`,
+                    }}
+                  >
+                    <div className="db-missing-card-top">
+                      <div className="db-missing-student-header">
+                        <div className="db-missing-student-name">
+                          👤 {m.studentName}
+                        </div>
+                        <span className="db-missing-student-id">
+                          ID: {m.studentRollNo || m.studentId || "N/A"}
+                        </span>
+                      </div>
+                      <StatusBadge s={m.status} />
+                    </div>
+
+                    <div className="db-missing-grid">
+                      <div className="db-missing-grid-item">
+                        <span className="db-missing-k">Assigned Driver:</span>
+                        <span className="db-missing-v font-bold">👮 {m.driverName || "Driver"}</span>
+                      </div>
+                      <div className="db-missing-grid-item">
+                        <span className="db-missing-k">Vehicle Number:</span>
+                        <span className="db-missing-v font-bold">🚌 {m.vehicleNumber || m.vehicleId || "N/A"}</span>
+                      </div>
+                      <div className="db-missing-grid-item">
+                        <span className="db-missing-k">Distance:</span>
+                        <span className={`db-missing-v ${isActive ? "db-missing-distance-alert" : ""}`}>
+                          📏 {m.distanceMeters} m {isActive ? "(> 10m limit)" : ""}
+                        </span>
+                      </div>
+                      <div className="db-missing-grid-item">
+                        <span className="db-missing-k">Alert Time:</span>
+                        <span className="db-missing-v">🕐 {fmt(m.alertTime || m.createdAt)}</span>
+                      </div>
+                      <div className="db-missing-grid-item">
+                        <span className="db-missing-k">Driver Location:</span>
+                        <span className="db-missing-v">
+                          📍 {m.driverLocation || `${m.driverLat}, ${m.driverLng}`}
+                          {m.driverLat && m.driverLng && (
+                            <a
+                              href={`https://www.google.com/maps?q=${m.driverLat},${m.driverLng}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="db-missing-map-link"
+                            >
+                              Maps ↗
+                            </a>
+                          )}
+                        </span>
+                      </div>
+                      <div className="db-missing-grid-item">
+                        <span className="db-missing-k">Student Location:</span>
+                        <span className="db-missing-v">
+                          📍 {m.studentLocation || `${m.studentLat}, ${m.studentLng}`}
+                          {m.studentLat && m.studentLng && (
+                            <a
+                              href={`https://www.google.com/maps?q=${m.studentLat},${m.studentLng}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="db-missing-map-link"
+                            >
+                              Maps ↗
+                            </a>
+                          )}
+                        </span>
+                      </div>
+                    </div>
+
+                    {!isActive && (m.resolvedReason || m.resolvedAt) && (
+                      <div className="db-missing-resolved-info">
+                        ✅ <strong>Closed / Resolved:</strong> {m.resolvedReason || "Journey Completed"}{" "}
+                        {m.resolvedAt && `· ${fmt(m.resolvedAt)}`}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+            )}
+          </section>
+        )}
+
 
         {/* Route alerts */}
         {(alertTab === "all" || alertTab === "route") && (
@@ -904,11 +1105,11 @@ const Dashboard = () => {
               {routeOptions.length > 0
                 ? routeOptions.map((r) => <option key={r} value={r}>{r}</option>)
                 : [
-                    "Chennai - Route 1",
-                    "Chennai - Route 6 (TAMBARAM)",
-                    "Arani - Route 1",
-                    "Bangalore - Route 1",
-                  ].map((r) => <option key={r} value={r}>{r}</option>)}
+                  "Chennai - Route 1",
+                  "Chennai - Route 6 (TAMBARAM)",
+                  "Arani - Route 1",
+                  "Bangalore - Route 1",
+                ].map((r) => <option key={r} value={r}>{r}</option>)}
             </select>
           </div>
           <div>
@@ -1064,18 +1265,22 @@ const Dashboard = () => {
                 pulse={stats?.systemIssues > 0}
               />
             )}
-            {canSeeCard(user, "alertsRaised") && (
-              <StatCard
-                icon={<Bell size={22} color="#B91C1C" />}
-                label="Alerts Raised"
-                color="#B91C1C"
-                bg="#FEE2E2"
-                value={loading ? "…" : alertsToday}
-                sub="Today — tap for split"
-                onClick={() => { setAlertTab("all"); setModal("alerts"); }}
-                pulse={alertsToday > 0}
-              />
-            )}
+            {canSeeCard(user, "alertsRaised") && (() => {
+              const activeMissingCount = missingAlerts.filter((m) => m.status === "ACTIVE").length;
+              const hasActive = activeMissingCount > 0;
+              return (
+                <StatCard
+                  icon={<Bell size={22} color={hasActive ? "#DC2626" : "#B91C1C"} />}
+                  label="Alerts Raised"
+                  color={hasActive ? "#DC2626" : "#B91C1C"}
+                  bg="#FEE2E2"
+                  value={loading ? "…" : alertsToday}
+                  sub={hasActive ? `🚨 ${activeMissingCount} student missing!` : "Today — tap for split"}
+                  onClick={() => { setAlertTab(hasActive ? "missing" : "all"); setModal("alerts"); }}
+                  pulse={alertsToday > 0 || hasActive}
+                />
+              );
+            })()}
             {canSeeCard(user, "studentsBoarded") && (
               <StatCard
                 icon={<GraduationCap size={22} color="#7E22CE" />}
@@ -1088,6 +1293,35 @@ const Dashboard = () => {
               />
             )}
           </div>
+
+          {/* ── ACTIVE STUDENT MISSING EMERGENCY BANNER ── */}
+          {missingAlerts.some((m) => m.status === "ACTIVE") && (
+            <div className="db-missing-emergency-banner">
+              <div className="db-missing-emergency-left">
+                <span className="db-missing-pulse-icon">🚨</span>
+                <div>
+                  <div className="db-missing-emergency-title">
+                    CRITICAL: {missingAlerts.filter((m) => m.status === "ACTIVE").length} Student Missing Alert(s) Active!
+                  </div>
+                  <div className="db-missing-emergency-sub">
+                    {missingAlerts
+                      .filter((m) => m.status === "ACTIVE")
+                      .map((m) => `${m.studentName} (Distance: ${m.distanceMeters}m from Bus ${m.vehicleNumber})`)
+                      .join("  •  ")}
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setAlertTab("missing");
+                  setModal("alerts");
+                }}
+                className="db-missing-emergency-btn"
+              >
+                VIEW MISSING ALERTS →
+              </button>
+            </div>
+          )}
 
           {/* ── LIVE TRANSIT INDICATOR BAR ── */}
           {canSeeCard(user, "liveTransit") &&
@@ -1104,6 +1338,7 @@ const Dashboard = () => {
                     </span>
                   </div>
                 )}
+
                 {activeHalts.length > 0 && (
                   <div className="db-halt-bar">
                     <span className="db-halt-label">

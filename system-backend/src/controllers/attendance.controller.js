@@ -1,6 +1,12 @@
 const prisma = require("../prisma/prisma");
 const { triggerNotification } = require("../utils/notification");
 const { getVehicleLocation, isVehicleOnline, getAllOnlineVehicles, calculateDistanceMeters, setVehicleLocation, clearVehicleLocation } = require("../utils/vehicleLocationStore");
+const {
+  startStudentTransit,
+  endStudentTransit,
+  endVehicleTransit,
+  updateStudentLocation,
+} = require("../services/missingAlertService");
 
 exports.recordAttendance = async (req, res) => {
   try {
@@ -237,6 +243,55 @@ exports.recordAttendance = async (req, res) => {
           console.log("Parent notification error (non-fatal):", notifErr.message);
         }
       }
+      // ── Missing Alert Transit Lifecycle ──
+      try {
+        const normStage = (stage || "").toUpperCase();
+        const isBoardingStage =
+          normStage === "TO_COLLEGE" ||
+          normStage === "TO_HOME" ||
+          normStage === "MORNING_PICKUP" ||
+          normStage === "MORNING_INROUTE" ||
+          normStage === "EVENING_INROUTE";
+
+        const isArrivalOrCloseStage =
+          normStage === "AT_COLLEGE" ||
+          normStage === "AT_HOME" ||
+          normStage === "MORNING_COLLEGE" ||
+          normStage === "EVENING_DROP" ||
+          normStage === "CLOSED" ||
+          normStage === "DROPPED";
+
+        const io = req.app.get("io");
+
+        if (isBoardingStage) {
+          await startStudentTransit({
+            studentId: user.id,
+            studentName: user.name,
+            studentRollNo: user.rollNumber || user.studentRollNo,
+            vehicleId: vehicleRecord?.id || targetVehicle,
+            vehicleNumber: vehicleRecord?.number || targetVehicle,
+            driverId: vehicleRecord?.driverId,
+            driverName: vehicleRecord?.driver?.name,
+            stage: normStage,
+            latitude,
+            longitude,
+            io,
+          });
+        } else if (isArrivalOrCloseStage) {
+          const reason = normStage.includes("COLLEGE")
+            ? "Arrived at College"
+            : normStage.includes("HOME") || normStage.includes("DROP")
+            ? "Arrived at Home"
+            : "Attendance Closed";
+          await endStudentTransit({
+            studentId: user.id,
+            reason,
+            io,
+          });
+        }
+      } catch (transitErr) {
+        console.error("MissingAlert transit tracking error (non-fatal):", transitErr.message);
+      }
     }
 
     // ── Auto-enroll coordinator ──
@@ -309,6 +364,18 @@ exports.recordAttendance = async (req, res) => {
         clearVehicleLocation(vehicleKey);
         if (vehicleRecord?.number) clearVehicleLocation(vehicleRecord.number);
         console.log(`[attendance] 🔴 Vehicle ${vehicleKey} cleared from GPS store on CLOSED scan`);
+
+        // Close all active missing alerts for this vehicle on trip completion
+        try {
+          const io = req.app.get("io");
+          await endVehicleTransit({
+            vehicleId: vehicleRecord?.id || targetVehicle,
+            reason: "Trip Completed",
+            io,
+          });
+        } catch (closeErr) {
+          console.error("Failed to close vehicle missing alerts on trip close:", closeErr.message);
+        }
       }
     }
     // ─────────────────────────────────────────────────────────────────────────
@@ -954,3 +1021,41 @@ exports.getDashboardBoardingSummary = async (req, res) => {
     return res.status(500).json({ success: false, message: error.message });
   }
 };
+
+/**
+ * POST /api/attendance/student-location
+ * REST endpoint for student GPS pings (continuous location updates while in transit)
+ */
+exports.recordStudentLocation = async (req, res) => {
+  try {
+    const { studentId, userId, vehicleId, vehicleNumber, latitude, longitude } = req.body;
+    const targetUserId = studentId || userId || req.user?.id;
+
+    if (!targetUserId || latitude == null || longitude == null) {
+      return res.status(400).json({
+        success: false,
+        message: "studentId, latitude and longitude are required",
+      });
+    }
+
+    const io = req.app.get("io");
+    const alert = await updateStudentLocation({
+      studentId: targetUserId,
+      vehicleId,
+      vehicleNumber,
+      latitude,
+      longitude,
+      io,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Student location updated",
+      missingAlert: alert,
+    });
+  } catch (error) {
+    console.error("recordStudentLocation Error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+

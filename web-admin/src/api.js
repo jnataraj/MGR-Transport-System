@@ -365,6 +365,37 @@ export const fetchRouteAlerts = async (params = {}) => {
   }
 };
 
+export const fetchMissingAlerts = async (params = {}) => {
+  try {
+    const url = `${API_BASE}/notifications/missing-alerts${buildQuery(params)}`;
+    const response = await fetch(url);
+    return handleResponse(response);
+  } catch (e) {
+    console.error("fetchMissingAlerts error:", e);
+    return { success: false, missingAlerts: [], count: 0, activeCount: 0 };
+  }
+};
+
+export const fetchActiveMissingAlerts = async () => {
+  try {
+    const url = `${API_BASE}/notifications/missing-alerts/active`;
+    const response = await fetch(url);
+    return handleResponse(response);
+  } catch (e) {
+    console.error("fetchActiveMissingAlerts error:", e);
+    return { success: false, activeAlerts: [], count: 0 };
+  }
+};
+
+export const resolveMissingAlert = async (id, reason) => {
+  const response = await fetch(`${API_BASE}/notifications/missing-alerts/${id}/resolve`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason }),
+  });
+  return handleResponse(response);
+};
+
 export const createRouteAlert = async (data) => {
   const response = await fetch(`${API_BASE}/notifications/route-alerts`, {
     method: "POST",
@@ -373,6 +404,7 @@ export const createRouteAlert = async (data) => {
   });
   return handleResponse(response);
 };
+
 
 export default {
   socket,

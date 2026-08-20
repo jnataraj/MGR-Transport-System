@@ -474,3 +474,33 @@ model SystemSettings {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 }
+
+// ── Student Missing Alert (Distance > 10m from assigned driver after boarding) ──
+model StudentMissingAlert {
+  id             String    @id @default(uuid())
+  studentId      String
+  studentName    String
+  studentRollNo  String?
+  driverId       String?
+  driverName     String?
+  vehicleId      String
+  vehicleNumber  String
+  driverLat      Float
+  driverLng      Float
+  studentLat     Float
+  studentLng     Float
+  distanceMeters Float
+  status         String    @default("ACTIVE") // ACTIVE | CLOSED | RESOLVED
+  stage          String?   // TO_COLLEGE | TO_HOME | MORNING_PICKUP | etc.
+  alertTime      DateTime  @default(now())
+  resolvedAt     DateTime?
+  resolvedReason String?   // "Arrived at College" | "Arrived at Home" | "Attendance Closed" | "Rejoined Vehicle (<10m)" | "Trip Completed"
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([studentId])
+  @@index([vehicleId])
+  @@index([status])
+  @@index([alertTime])
+}
+

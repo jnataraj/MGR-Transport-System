@@ -1,23 +1,3 @@
-// const express = require("express");
-// const router = express.Router();
-// const notificationController = require("../controllers/notification.controller");
-// const authMiddleware = require("../middleware/auth.middleware");
-
-// // Register Expo Push Token for logged-in user
-// router.post("/push-token", authMiddleware.verifyToken, notificationController.savePushToken);
-
-// // Admin send notification
-// router.post("/send", authMiddleware.verifyToken, notificationController.sendNotification);
-
-// // Get notifications for logged-in user
-// router.get("/", authMiddleware.verifyToken, notificationController.getUserNotifications);
-
-// // Mark notification as read
-// router.put("/:id/read", authMiddleware.verifyToken, notificationController.markAsRead);
-
-// module.exports = router;
-
-
 const express = require("express");
 const router = express.Router();
 const notificationController = require("../controllers/notification.controller");
@@ -32,6 +12,11 @@ router.post("/send", authMiddleware.verifyToken, notificationController.sendNoti
 // Route alerts / notifications breakdown
 router.get("/route-alerts", notificationController.getRouteAlerts);
 router.post("/route-alerts", notificationController.createRouteAlert);
+
+// Student Missing Alerts
+router.get("/missing-alerts", notificationController.fetchMissingAlerts);
+router.get("/missing-alerts/active", notificationController.fetchActiveMissingAlerts);
+router.put("/missing-alerts/:id/resolve", notificationController.resolveMissingAlert);
 
 // Get notifications for logged-in user
 router.get("/", authMiddleware.verifyToken, notificationController.getUserNotifications);

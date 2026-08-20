@@ -526,12 +526,48 @@ export default function MainDashboard({ user, token, onLogout }) {
         });
         setUnreadAlerts((prev) => prev + 1);
       });
+
+      // ── Real-Time Student Missing Alert for Driver ──
+      socketRef.current.on("driver_student_missing_alert", (alert) => {
+        const studentName = alert.studentName || "Student";
+        const dist = alert.distanceMeters ?? "10+";
+        const alertMsg = `Student: ${studentName}\nDistance: ${dist} m\nPlease check the student's location.`;
+
+        Alert.alert("🚨 Student Missing Alert", alertMsg, [{ text: "OK" }]);
+
+        setRouteAlerts((prev) => [
+          {
+            id: alert.id || Date.now().toString(),
+            title: "🚨 Student Missing Alert",
+            message: alertMsg,
+            notificationType: "missing_alert",
+            studentName,
+            distanceMeters: dist,
+            effectiveDate: new Date().toISOString().split("T")[0],
+            effectiveTime: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            receivedAt: new Date().toISOString(),
+          },
+          ...prev.filter((p) => p.id !== alert.id),
+        ]);
+        setUnreadAlerts((c) => c + 1);
+      });
+
+      socketRef.current.on("student_missing_alert_resolved", (res) => {
+        setRouteAlerts((prev) =>
+          prev.map((a) =>
+            a.id === res.id || a.studentId === res.studentId
+              ? { ...a, message: `✅ ${a.studentName || "Student"} — Resolved (${res.resolvedReason || "Closed"}).` }
+              : a
+          )
+        );
+      });
     })();
 
     return () => {
       if (socketRef.current) socketRef.current.disconnect();
     };
   }, [role, user?.id]);
+
 
   useEffect(() => {
     let locationWatcher = null;
@@ -1932,12 +1968,112 @@ export default function MainDashboard({ user, token, onLogout }) {
               </Text>
             }
             renderItem={({ item }) => {
+              const isMissingAlert = item.notificationType === "missing_alert";
               const isAlertType =
                 item.notificationType === "maintenance" ||
                 item.notificationType === "halt" ||
                 item.notificationType === "broadcast" ||
                 item.notificationType === "RouteDelayed" ||
                 item.notificationType === "RouteCancelled";
+
+              if (isMissingAlert) {
+                return (
+                  <View
+                    style={[
+                      styles.notifTile,
+                      {
+                        backgroundColor: "#FEF2F2",
+                        borderColor: "#F87171",
+                        borderWidth: 1.5,
+                      },
+                    ]}
+                  >
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        marginBottom: 6,
+                        borderBottomWidth: 1,
+                        borderBottomColor: "#FEE2E2",
+                        paddingBottom: 4,
+                      }}
+                    >
+                      <View style={{ flexDirection: "row", alignItems: "center" }}>
+                        <Text style={{ fontSize: 13, marginRight: 5 }}>🚨</Text>
+                        <Text
+                          style={{
+                            fontSize: 9,
+                            fontWeight: "900",
+                            color: "#DC2626",
+                            letterSpacing: 0.5,
+                          }}
+                        >
+                          STUDENT MISSING ALERT
+                        </Text>
+                      </View>
+                      <View
+                        style={{
+                          backgroundColor: "#DC2626",
+                          paddingHorizontal: 6,
+                          paddingVertical: 2,
+                          borderRadius: 4,
+                        }}
+                      >
+                        <Text style={{ color: "#fff", fontSize: 8, fontWeight: "900" }}>
+                          &gt; 10M
+                        </Text>
+                      </View>
+                    </View>
+
+                    <Text
+                      style={{
+                        fontSize: 12,
+                        fontWeight: "900",
+                        color: "#991B1B",
+                        marginBottom: 3,
+                      }}
+                    >
+                      Student: {item.studentName || item.title}
+                    </Text>
+
+                    <Text
+                      style={{
+                        fontSize: 11,
+                        fontWeight: "800",
+                        color: "#DC2626",
+                        marginBottom: 3,
+                      }}
+                    >
+                      Distance: {item.distanceMeters ?? "10+"} m
+                    </Text>
+
+                    <Text
+                      style={{
+                        fontSize: 10,
+                        color: "#7F1D1D",
+                        fontWeight: "600",
+                        marginBottom: 8,
+                      }}
+                    >
+                      Please check the student's location.
+                    </Text>
+
+                    <TouchableOpacity
+                      style={[styles.smallBtn, { backgroundColor: "#DC2626" }]}
+                      onPress={() => {
+                        Alert.alert(
+                          "🚨 Student Missing Alert",
+                          `Student: ${item.studentName || "Student"}\nDistance: ${item.distanceMeters ?? "10+"} m\n\nPlease verify student safety immediately.`,
+                          [{ text: "OK" }]
+                        );
+                      }}
+                    >
+                      <Text style={styles.smallBtnText}>Check Student</Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              }
 
               return (
                 <View
@@ -1975,7 +2111,7 @@ export default function MainDashboard({ user, token, onLogout }) {
                   </View>
 
                   <Text style={styles.notifText}>
-                    {item.customMessage || item.routeName}
+                    {item.message || item.customMessage || item.routeName}
                   </Text>
 
                   {isAlertType ? (
@@ -2004,6 +2140,7 @@ export default function MainDashboard({ user, token, onLogout }) {
                 </View>
               );
             }}
+
             keyExtractor={(item) => String(item.id)}
           />
         </View>
