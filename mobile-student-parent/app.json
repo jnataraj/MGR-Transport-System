@@ -8,7 +8,17 @@
     "userInterfaceStyle": "light",
     "plugins": [
       "expo-camera",
-      "react-native-maps"
+      "react-native-maps",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow CTMS Student App to access your location in the background for active transit tracking.",
+          "locationAlwaysPermission": "Allow CTMS Student App to access your location in the background for active transit tracking.",
+          "locationWhenInUsePermission": "Allow CTMS Student App to access your location to track your transit route.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ]
     ],
     "ios": {
       "supportsTablet": true,
@@ -24,6 +34,9 @@
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
         "CAMERA",
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"

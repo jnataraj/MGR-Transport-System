@@ -18,8 +18,13 @@ router.get("/bus-location", attendanceController.getBusLiveLocation);
 // GET /api/attendance/dashboard-summary - Boarding summary for admin dashboard (boarded + zones)
 router.get("/dashboard-summary", attendanceController.getDashboardBoardingSummary);
 
-// POST /api/attendance/student-location - Update student location & check missing status
+// POST /api/attendance/student-location & /student-heartbeat - Update student location & check missing status
 router.post("/student-location", attendanceController.recordStudentLocation);
+router.post("/student-heartbeat", attendanceController.recordStudentLocation);
+
+// POST /api/attendance/driver-location & /driver-heartbeat - Update driver GPS & heartbeat (foreground/background)
+router.post("/driver-location", attendanceController.recordDriverLocation);
+router.post("/driver-heartbeat", attendanceController.recordDriverLocation);
 
 // POST /api/attendance - Record QR scan attendance
 router.post("/", attendanceController.recordAttendance);

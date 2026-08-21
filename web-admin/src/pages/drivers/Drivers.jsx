@@ -39,7 +39,9 @@ const getStatusStyles = (status) => {
 };
 
 const isDriverLive = (user, liveVehicles) => {
-  if (!user || !liveVehicles || liveVehicles.size === 0) return false;
+  if (!user) return false;
+  if (user.isOnline === true) return true;
+  if (!liveVehicles || liveVehicles.size === 0) return false;
   return (
     liveVehicles.has(user.id) ||
     liveVehicles.has(user.vehicle) ||

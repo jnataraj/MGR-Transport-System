@@ -112,8 +112,14 @@ export default function useAttendanceScanner({ user, token, enabled = true }) {
       });
       latitude = location.coords.latitude;
       longitude = location.coords.longitude;
+      console.log(`[GPS DEBUG][STUDENT]
+latitude: ${latitude}
+longitude: ${longitude}
+accuracy: ${location.coords.accuracy}
+timestamp: ${new Date(location.timestamp).toISOString()}
+source: StudentApp-useAttendanceScanner`);
     } catch (error) {
-      console.warn("Student GPS unavailable:", error?.message);
+      console.warn("[GPS DEBUG][STUDENT] Student GPS unavailable:", error?.message);
     }
 
     let response;

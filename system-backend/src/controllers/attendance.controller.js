@@ -6,6 +6,7 @@ const {
   endStudentTransit,
   endVehicleTransit,
   updateStudentLocation,
+  updateDriverLocation,
 } = require("../services/missingAlertService");
 
 exports.recordAttendance = async (req, res) => {
@@ -150,6 +151,20 @@ exports.recordAttendance = async (req, res) => {
         resolvedVehicleLoc.latitude, resolvedVehicleLoc.longitude
       );
       const PROXIMITY_LIMIT_METERS = 5000; // 5 km
+
+      console.log(`[GPS DEBUG][BACKEND][STUDENT]
+vehicleId: ${targetVehicle}
+studentId: ${scannerUserId}
+latitude: ${latitude}
+longitude: ${longitude}
+timestamp: ${now.toISOString()}`);
+
+      console.log(`[GPS DEBUG][DISTANCE]
+driverLat: ${resolvedVehicleLoc.latitude}
+driverLng: ${resolvedVehicleLoc.longitude}
+studentLat: ${latitude}
+studentLng: ${longitude}
+distanceMeters: ${Math.round(distanceMeters)}`);
 
       console.log(`[proximity-check] Student ${scannerUserId} is ${Math.round(distanceMeters)} m from vehicle ${targetVehicle} (limit: ${PROXIMITY_LIMIT_METERS} m)`);
 
@@ -355,6 +370,13 @@ exports.recordAttendance = async (req, res) => {
 
       // 3. Seed / clear vehicle GPS store from driver's QR scan
       if (isStart && latitude != null && longitude != null) {
+        console.log(`[GPS DEBUG][BACKEND][DRIVER]
+vehicleId: ${vehicleKey}
+driverId: ${user.id}
+latitude: ${latitude}
+longitude: ${longitude}
+timestamp: ${now.toISOString()}`);
+
         setVehicleLocation(vehicleKey, parseFloat(latitude), parseFloat(longitude));
         if (vehicleRecord?.number && vehicleRecord.number !== vehicleKey) {
           setVehicleLocation(vehicleRecord.number, parseFloat(latitude), parseFloat(longitude));
@@ -1038,6 +1060,18 @@ exports.recordStudentLocation = async (req, res) => {
       });
     }
 
+    const now = new Date();
+
+    // 1. Update Student's lastSeenAt timestamp in DB
+    try {
+      await prisma.user.update({
+        where: { id: targetUserId },
+        data: { lastSeenAt: now },
+      });
+    } catch (dbErr) {
+      console.warn(`[StudentTracking] Could not update User.lastSeenAt for ${targetUserId}:`, dbErr.message);
+    }
+
     const io = req.app.get("io");
     const alert = await updateStudentLocation({
       studentId: targetUserId,
@@ -1050,7 +1084,8 @@ exports.recordStudentLocation = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Student location updated",
+      message: "Student location & heartbeat recorded",
+      lastSeenAt: now.toISOString(),
       missingAlert: alert,
     });
   } catch (error) {
@@ -1058,4 +1093,135 @@ exports.recordStudentLocation = async (req, res) => {
     return res.status(500).json({ success: false, message: error.message });
   }
 };
+
+/**
+ * POST /api/attendance/driver-location
+ * REST endpoint for driver background/foreground location updates & heartbeats
+ */
+exports.recordDriverLocation = async (req, res) => {
+  try {
+    const {
+      driverId,
+      userId,
+      vehicleId,
+      vehicleNumber,
+      latitude,
+      longitude,
+      speed,
+      heading,
+      isHalted,
+      timestamp,
+      role = "driver",
+    } = req.body;
+
+    const targetDriverId = driverId || userId || req.user?.id;
+    if (!targetDriverId) {
+      return res.status(400).json({
+        success: false,
+        message: "driverId or userId is required",
+      });
+    }
+
+    const now = new Date();
+
+    // 1. Update Driver's lastSeenAt timestamp in DB
+    try {
+      await prisma.user.update({
+        where: { id: targetDriverId },
+        data: { lastSeenAt: now },
+      });
+    } catch (dbErr) {
+      // Driver might be simulated or id slightly different
+      console.warn(`[DriverTracking] Could not update User.lastSeenAt for ${targetDriverId}:`, dbErr.message);
+    }
+
+    // 2. Resolve vehicle if not provided
+    let resolvedVehicleId = vehicleId;
+    let resolvedVehicleNumber = vehicleNumber;
+
+    if (!resolvedVehicleId && targetDriverId) {
+      const vehicle = await prisma.vehicle.findFirst({
+        where: { driverId: targetDriverId },
+        select: { id: true, number: true },
+      });
+      if (vehicle) {
+        resolvedVehicleId = vehicle.id;
+        resolvedVehicleNumber = vehicle.number;
+      }
+    }
+
+    const lat = latitude != null ? parseFloat(latitude) : null;
+    const lng = longitude != null ? parseFloat(longitude) : null;
+
+    // 3. Update in-memory store
+    if (resolvedVehicleId && lat != null && lng != null) {
+      console.log(`[GPS DEBUG][BACKEND][DRIVER]
+vehicleId: ${resolvedVehicleId}
+driverId: ${targetDriverId}
+latitude: ${lat}
+longitude: ${lng}
+timestamp: ${now.toISOString()}`);
+
+      setVehicleLocation(resolvedVehicleId, lat, lng, {
+        vehicleNumber: resolvedVehicleNumber,
+        driverId: targetDriverId,
+        speed,
+        heading,
+        isHalted,
+      });
+    } else if (targetDriverId && lat != null && lng != null) {
+      setVehicleLocation(targetDriverId, lat, lng, {
+        driverId: targetDriverId,
+        speed,
+        heading,
+        isHalted,
+      });
+    }
+
+    const io = req.app.get("io");
+
+    // 4. Update student missing proximity checks if location is present
+    if (resolvedVehicleId && lat != null && lng != null) {
+      try {
+        await updateDriverLocation({
+          vehicleId: resolvedVehicleId,
+          driverId: targetDriverId,
+          latitude: lat,
+          longitude: lng,
+          io,
+        });
+      } catch (proxErr) {
+        console.error("[DriverTracking] Proximity update error:", proxErr.message);
+      }
+    }
+
+    // 5. Broadcast to connected clients / Web Admin
+    if (io && (resolvedVehicleId || targetDriverId)) {
+      io.emit("busLocationChanged", {
+        vehicleId: resolvedVehicleId,
+        vehicleNumber: resolvedVehicleNumber,
+        driverId: targetDriverId,
+        lat,
+        lng,
+        latitude: lat,
+        longitude: lng,
+        speed: speed != null ? parseFloat(speed) : 0,
+        heading: heading != null ? parseFloat(heading) : null,
+        isHalted: !!isHalted,
+        role,
+        timestamp: timestamp || now.toISOString(),
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Driver location & heartbeat recorded",
+      lastSeenAt: now.toISOString(),
+    });
+  } catch (error) {
+    console.error("[DriverTracking] recordDriverLocation Error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 

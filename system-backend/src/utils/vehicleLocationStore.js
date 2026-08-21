@@ -1,35 +1,69 @@
-const vehicleLocations = new Map();
+const DEFAULT_TIMEOUT_MS = process.env.DRIVER_ACTIVE_TIMEOUT_MS
+    ? parseInt(process.env.DRIVER_ACTIVE_TIMEOUT_MS, 10)
+    : 120000; // 2 minutes default
 
-const setVehicleLocation = (vehicleId, latitude, longitude) => {
+const vehicleLocations = new Map();
+// Key: driverId -> { vehicleId, latitude, longitude, updatedAt }
+const driverLocations = new Map();
+
+const setVehicleLocation = (vehicleId, latitude, longitude, extra = {}) => {
     if (!vehicleId || latitude == null || longitude == null) return;
-    vehicleLocations.set(vehicleId, {
+    const now = new Date();
+    const entry = {
+        vehicleId,
+        vehicleNumber: extra.vehicleNumber || null,
+        driverId: extra.driverId || null,
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
-        updatedAt: new Date(),
-    });
+        speed: extra.speed != null ? parseFloat(extra.speed) : 0,
+        heading: extra.heading != null ? parseFloat(extra.heading) : null,
+        isHalted: !!extra.isHalted,
+        updatedAt: now,
+    };
+    vehicleLocations.set(vehicleId, entry);
+    if (extra.vehicleNumber && extra.vehicleNumber !== vehicleId) {
+        vehicleLocations.set(extra.vehicleNumber, entry);
+    }
+    if (extra.driverId) {
+        driverLocations.set(extra.driverId, entry);
+        vehicleLocations.set(extra.driverId, entry);
+    }
 };
 
 const getVehicleLocation = (vehicleId) => vehicleLocations.get(vehicleId) || null;
+const getDriverLocation = (driverId) => driverLocations.get(driverId) || null;
 
-// A driver counts as "online" if we've heard a GPS ping in the last 45s.
-const isVehicleOnline = (vehicleId, thresholdMs = 45000) => {
+// A driver counts as "online" if we've heard a GPS / heartbeat ping within the timeout threshold
+const isVehicleOnline = (vehicleId, thresholdMs = DEFAULT_TIMEOUT_MS) => {
     const loc = vehicleLocations.get(vehicleId);
     if (!loc) return false;
     return Date.now() - loc.updatedAt.getTime() < thresholdMs;
 };
 
-const getAllOnlineVehicles = (thresholdMs = 45000) => {
+const getAllOnlineVehicles = (thresholdMs = DEFAULT_TIMEOUT_MS) => {
     const onlineIds = [];
     const now = Date.now();
-    for (const [vehicleId, loc] of vehicleLocations.entries()) {
+    for (const [key, loc] of vehicleLocations.entries()) {
         if (now - loc.updatedAt.getTime() < thresholdMs) {
-            onlineIds.push(vehicleId);
+            onlineIds.push(key);
         }
     }
     return onlineIds;
 };
 
-const clearVehicleLocation = (vehicleId) => vehicleLocations.delete(vehicleId);
+const clearVehicleLocation = (vehicleId) => {
+    if (!vehicleId) return;
+    const entry = vehicleLocations.get(vehicleId);
+    if (entry) {
+        if (entry.vehicleId) vehicleLocations.delete(entry.vehicleId);
+        if (entry.vehicleNumber) vehicleLocations.delete(entry.vehicleNumber);
+        if (entry.driverId) {
+            vehicleLocations.delete(entry.driverId);
+            driverLocations.delete(entry.driverId);
+        }
+    }
+    vehicleLocations.delete(vehicleId);
+};
 
 /**
  * Haversine formula — returns the great-circle distance in **metres**
@@ -59,4 +93,13 @@ const calculateDistanceMeters = (lat1, lon1, lat2, lon2) => {
     return R * c;
 };
 
-module.exports = { setVehicleLocation, getVehicleLocation, isVehicleOnline, getAllOnlineVehicles, clearVehicleLocation, calculateDistanceMeters };
+module.exports = {
+    setVehicleLocation,
+    getVehicleLocation,
+    getDriverLocation,
+    isVehicleOnline,
+    getAllOnlineVehicles,
+    clearVehicleLocation,
+    calculateDistanceMeters,
+    DEFAULT_TIMEOUT_MS,
+};

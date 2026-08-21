@@ -18,6 +18,11 @@ import { io } from "socket.io-client";
 import { API_BASE } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { registerForPushNotificationsAsync } from "../services/notificationService";
+import {
+  startStudentTracking,
+  stopStudentTracking,
+  requestStudentLocationPermissions,
+} from "../services/studentTrackingService";
 import logo from "../../assets/logo.png";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import BottomTabBar from "../components/BottomTabBar";
@@ -589,15 +594,14 @@ export default function MainDashboard({ user, token, onLogout }) {
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
       latitude = loc.coords.latitude;
       longitude = loc.coords.longitude;
-      console.log("[handleScanQR] 📡 Student GPS acquired:", {
-        latitude,
-        longitude,
-        accuracy: loc.coords.accuracy,   // metres — lower is better
-        altitude: loc.coords.altitude,
-        timestamp: new Date(loc.timestamp).toISOString(),
-      });
+      console.log(`[GPS DEBUG][STUDENT]
+latitude: ${latitude}
+longitude: ${longitude}
+accuracy: ${loc.coords.accuracy}
+timestamp: ${new Date(loc.timestamp).toISOString()}
+source: StudentApp-handleScanQR`);
     } catch (gpsErr) {
-      console.warn("[handleScanQR] ⚠️ GPS unavailable:", gpsErr?.message);
+      console.warn("[GPS DEBUG][STUDENT] GPS unavailable:", gpsErr?.message);
       /* backend will reject with STUDENT_GPS_MISSING */
     }
 
@@ -800,9 +804,8 @@ export default function MainDashboard({ user, token, onLogout }) {
           {
             text: "Accept",
             onPress: async () => {
-              const { status } =
-                await Location.requestForegroundPermissionsAsync();
-              if (status === "granted") {
+              const perm = await requestStudentLocationPermissions();
+              if (perm.granted) {
                 setGpsEnabled(true);
               } else {
                 setGpsEnabled(false);
@@ -854,6 +857,45 @@ export default function MainDashboard({ user, token, onLogout }) {
         });
         setUnreadAlerts((prev) => prev + 1);
       });
+
+      // ── Real-Time Student Missing Alert for Parent ──
+      socketRef.current.on("driver_student_missing_alert", (alert) => {
+        if (userRole === "parent") {
+          const studentName = alert.studentName || "Your Child";
+          const dist = alert.distanceMeters ?? "10+";
+          const alertMsg = `Alert: Student ${studentName} is more than 10 meters (${dist} m) away from assigned vehicle ${alert.vehicleNumber || ""}. Please check student status.`;
+
+          Alert.alert("🚨 Student Missing Alert", alertMsg, [{ text: "OK" }]);
+
+          setRouteAlerts((prev) => [
+            {
+              id: alert.id || Date.now().toString(),
+              title: "🚨 Student Missing Alert",
+              message: alertMsg,
+              notificationType: "missing_alert",
+              studentName,
+              distanceMeters: dist,
+              effectiveDate: new Date().toISOString().split("T")[0],
+              effectiveTime: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+              receivedAt: new Date().toISOString(),
+            },
+            ...prev.filter((p) => p.id !== alert.id),
+          ]);
+          setUnreadAlerts((c) => c + 1);
+        }
+      });
+
+      socketRef.current.on("student_missing_alert_resolved", (res) => {
+        if (userRole === "parent") {
+          setRouteAlerts((prev) =>
+            prev.map((a) =>
+              a.id === res.id || a.studentId === res.studentId
+                ? { ...a, message: `✅ ${a.studentName || "Student"} — Resolved (${res.resolvedReason || "Closed"}).` }
+                : a
+            )
+          );
+        }
+      });
     } catch { }
     return () => {
       try {
@@ -862,97 +904,40 @@ export default function MainDashboard({ user, token, onLogout }) {
     };
   }, [userRole, userId]);
 
-  // ── Student Continuous GPS Tracking during active transit journey ──
-  useEffect(() => {
-    let locationWatcher = null;
-    let locationInterval = null;
 
+  // ── Student Continuous Background GPS Tracking during active transit journey ──
+  useEffect(() => {
     const isStudentInTransit =
       userRole === "student" &&
       (boardStatus === STAGE.TO_COLLEGE || boardStatus === STAGE.TO_HOME);
 
     if (isStudentInTransit && gpsEnabled) {
-      const emitStudentLocation = (coords) => {
-        if (!coords) return;
-        const payload = {
-          studentId: userId,
-          studentName: user?.name,
-          studentRollNo: user?.rollNumber || user?.studentRollNo,
-          vehicleId: user?.vehicleId,
-          vehicleNumber: currentVehicleNumber || user?.vehicle,
-          latitude: coords.latitude,
-          longitude: coords.longitude,
-          lat: coords.latitude,
-          lng: coords.longitude,
-          timestamp: new Date().toISOString(),
-        };
-
-        // Emit via real-time socket
-        socketRef.current?.emit("studentLocationUpdate", payload);
-
-        // Also ping REST endpoint as resilient fallback
-        fetch(`${API_BASE}/api/attendance/student-location`, {
-          method: "POST",
-          headers: authHeaders,
-          body: JSON.stringify(payload),
-        }).catch(() => {});
-      };
-
-      (async () => {
-        try {
-          const loc = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Balanced,
-          });
-          if (loc?.coords) {
-            emitStudentLocation(loc.coords);
-          }
-        } catch (e) {
-          console.log("Initial student GPS error:", e.message);
-        }
-
-        try {
-          locationWatcher = await Location.watchPositionAsync(
-            {
-              accuracy: Location.Accuracy.High,
-              timeInterval: 5000,
-              distanceInterval: 5,
-            },
-            (loc) => {
-              if (loc?.coords) {
-                emitStudentLocation(loc.coords);
-              }
-            }
-          );
-        } catch (e) {
-          console.log("Student watchPositionAsync error, using interval fallback:", e.message);
-          locationInterval = setInterval(async () => {
-            try {
-              const loc = await Location.getCurrentPositionAsync({
-                accuracy: Location.Accuracy.Balanced,
-              });
-              if (loc?.coords) emitStudentLocation(loc.coords);
-            } catch {}
-          }, 8000);
-        }
-      })();
+      startStudentTracking({
+        user,
+        vehicleId: user?.vehicleId,
+        vehicleNumber: currentVehicleNumber || user?.vehicle,
+        token,
+        socket: socketRef.current,
+      });
     } else if (userRole === "student" && !isStudentInTransit) {
-      // Notify backend that student journey is completed / arrived
-      socketRef.current?.emit("studentTransitCompleted", {
+      const reason =
+        boardStatus === STAGE.AT_COLLEGE
+          ? "Arrived at College"
+          : boardStatus === STAGE.AT_HOME
+          ? "Arrived at Home"
+          : "Attendance Closed";
+
+      stopStudentTracking({
         studentId: userId,
-        reason:
-          boardStatus === STAGE.AT_COLLEGE
-            ? "Arrived at College"
-            : boardStatus === STAGE.AT_HOME
-            ? "Arrived at Home"
-            : "Attendance Closed",
+        reason,
+        socket: socketRef.current,
       });
     }
 
     return () => {
-      if (locationWatcher?.remove) locationWatcher.remove();
-      if (locationInterval) clearInterval(locationInterval);
+      // Student tracking service manages its own background/foreground lifecycle
     };
-  }, [userRole, boardStatus, gpsEnabled, userId, currentVehicleNumber]);
+  }, [userRole, boardStatus, gpsEnabled, userId, currentVehicleNumber, token, user]);
 
 
   const viewLiveLocation = () => {
@@ -978,12 +963,25 @@ export default function MainDashboard({ user, token, onLogout }) {
   };
 
   const confirmLogout = () => {
+    const doLogout = async () => {
+      try {
+        await stopStudentTracking({
+          studentId: userId,
+          reason: "Logged Out",
+          socket: socketRef.current,
+        });
+      } catch (err) {
+        console.log("Error stopping student tracking on logout:", err.message);
+      }
+      if (onLogout) {
+        await onLogout();
+      }
+    };
+
     if (Platform.OS === "web") {
       const confirm = window.confirm("Are you sure you want to log out?");
       if (confirm) {
-        if (onLogout) {
-          onLogout();
-        }
+        doLogout();
       }
     } else {
       Alert.alert("Log Out", "Are you sure you want to log out?", [
@@ -994,15 +992,7 @@ export default function MainDashboard({ user, token, onLogout }) {
         {
           text: "Log Out",
           style: "destructive",
-          onPress: async () => {
-            console.log("Logout button clicked");
-            console.log("onLogout =", onLogout);
-
-            if (onLogout) {
-              await onLogout();
-              console.log("Logout completed");
-            }
-          },
+          onPress: doLogout,
         },
       ]);
     }
@@ -2067,7 +2057,24 @@ export default function MainDashboard({ user, token, onLogout }) {
                           tagBg: "#DBEAFE",
                           tagText: "#1D4ED8",
                         },
+                        missing_alert: {
+                          Icon: AlertTriangle,
+                          label: "STUDENT MISSING ALERT",
+                          bgColor: "#FEF2F2",
+                          leftColor: "#DC2626",
+                          tagBg: "#FEE2E2",
+                          tagText: "#991B1B",
+                        },
+                        missing_alert_resolved: {
+                          Icon: CheckCircle,
+                          label: "MISSING ALERT RESOLVED",
+                          bgColor: "#F0FDF4",
+                          leftColor: "#10B981",
+                          tagBg: "#D1FAE5",
+                          tagText: "#065F46",
+                        },
                       };
+
                       const t = typeMap[alert.notificationType] || {
                         Icon: AlertCircle,
                         label: alert.notificationType,

@@ -1,5 +1,6 @@
 const bcrypt = require("bcryptjs");
 const prisma = require("../prisma/prisma");
+const { isVehicleOnline, DEFAULT_TIMEOUT_MS } = require("../utils/vehicleLocationStore");
 
 const sanitizeUserData = async (data, { isUpdate = false } = {}) => {
   const {
@@ -60,8 +61,17 @@ const formatUser = (user) => {
 
   const effectivePassword = plainPassword || (password && !password.startsWith("$2b$") ? password : "123456");
 
+  const isOnline = (() => {
+    if (user.id && isVehicleOnline(user.id)) return true;
+    if (user.lastSeenAt && Date.now() - new Date(user.lastSeenAt).getTime() < DEFAULT_TIMEOUT_MS) return true;
+    const assignedIds = vehicleList.map((v) => v.id).concat(vehicleList.map((v) => v.number));
+    return assignedIds.some((id) => isVehicleOnline(id));
+  })();
+
   return {
     ...rest,
+    isOnline,
+    lastSeenAt: user.lastSeenAt || null,
     password: effectivePassword,
     plainPassword: effectivePassword,
     employeeId: user.employeeId || (user.id ? user.id.slice(-8).toUpperCase() : null),

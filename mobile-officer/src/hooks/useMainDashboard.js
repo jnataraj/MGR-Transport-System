@@ -10,6 +10,11 @@ import * as Sharing from "expo-sharing";
 import { API_BASE, storeGpsEnabled, loadGpsEnabled } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { registerForPushNotificationsAsync } from "../services/notificationService";
+import {
+  startDriverTracking,
+  stopDriverTracking,
+  requestDriverLocationPermissions,
+} from "../services/driverTrackingService";
 import { mapBackendRole, getRoleCapabilities } from "../utils/role.utils";
 import { isWithinPeriod, mapMaintenanceOverview } from "../utils/maintenance.utils";
 import { mapNotificationToAlert } from "../utils/notification.utils";
@@ -38,9 +43,9 @@ export function useMainDashboard({ user, token, onLogout }) {
   const [selfieStatus, setSelfieStatus] = useState("PENDING");
   const [isScanConfirmOpen, setIsScanConfirmOpen] = useState(false);
   const [scannedData, setScannedData] = useState({
-    lat: "13.0674 N",
-    lng: "80.2376 E",
-    timestamp: new Date().toLocaleString(),
+    lat: "Fetching GPS...",
+    lng: "Fetching GPS...",
+    timestamp: "Pending",
   });
   const socketRef = useRef(null);
   const cameraRef = useRef(null);
@@ -352,16 +357,14 @@ export function useMainDashboard({ user, token, onLogout }) {
             text: "Accept",
             onPress: async () => {
               await requestCameraPermission();
-
-              const locationStatus =
-                await Location.requestForegroundPermissionsAsync();
-              if (locationStatus.status === "granted") {
+              const perm = await requestDriverLocationPermissions();
+              if (perm.granted) {
                 setGpsEnabled(true);
                 storeGpsEnabled(true);
               } else {
                 Alert.alert(
                   "Permission Denied",
-                  "GPS is required for full functionality.",
+                  "GPS location is required for live tracking.",
                 );
                 setGpsEnabled(false);
               }
@@ -408,69 +411,28 @@ export function useMainDashboard({ user, token, onLogout }) {
   }, [role, user?.id]);
 
   useEffect(() => {
-    let locationWatcher = null;
-    let heartbeatInterval = null;
-
     const shouldTrack = caps.canTrackGPS && qrStatus === "STARTED" && gpsEnabled;
 
     if (shouldTrack) {
-      const emitLocation = (coords) => {
-        if (!coords) return;
-        socketRef.current?.emit("driverLocationUpdate", {
-          vehicleId: userVehicle,
-          driverId: userId,
-          role: role || "driver",
-          lat: coords.latitude,
-          lng: coords.longitude,
-          latitude: coords.latitude,
-          longitude: coords.longitude,
-          timestamp: new Date().toISOString(),
-        });
-      };
-
-      (async () => {
-        // 1. Immediate position fix
-        try {
-          const initialLoc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          if (initialLoc?.coords) {
-            emitLocation(initialLoc.coords);
-          }
-        } catch (e) {
-          console.log("Initial GPS fix error:", e.message);
-        }
-
-        // 2. Continuous position watcher (every 10m)
-        try {
-          locationWatcher = await Location.watchPositionAsync(
-            { accuracy: Location.Accuracy.High, distanceInterval: 10 },
-            (loc) => emitLocation(loc.coords),
-          );
-        } catch (e) {
-          console.log("watchPositionAsync error:", e.message);
-        }
-
-        // 3. Periodic heartbeat every 15s so vehicle stays online even when stationary
-        heartbeatInterval = setInterval(async () => {
-          try {
-            const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }).catch(() => null);
-            if (loc?.coords) {
-              emitLocation(loc.coords);
-            }
-          } catch {}
-        }, 15000);
-      })();
+      startDriverTracking({
+        user,
+        vehicleId: userVehicle,
+        vehicleNumber: userVehicle,
+        token,
+        socket: socketRef.current,
+      });
     } else if (caps.canTrackGPS) {
-      socketRef.current?.emit("driverLocationStopped", {
+      stopDriverTracking({
         vehicleId: userVehicle,
         driverId: userId,
+        socket: socketRef.current,
       });
     }
 
     return () => {
-      locationWatcher?.remove();
-      if (heartbeatInterval) clearInterval(heartbeatInterval);
+      // Driver tracking service manages its own background/foreground lifecycle
     };
-  }, [qrStatus, gpsEnabled, role, caps.canTrackGPS, userVehicle, userId]);
+  }, [qrStatus, gpsEnabled, role, caps.canTrackGPS, userVehicle, userId, token, user]);
 
   useEffect(() => {
     (async () => {
@@ -478,6 +440,26 @@ export function useMainDashboard({ user, token, onLogout }) {
       if (saved) {
         const { status } = await Location.getForegroundPermissionsAsync();
         setGpsEnabled(status === "granted");
+      }
+
+      try {
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (status === "granted") {
+          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+          if (loc?.coords) {
+            setScannedData({
+              lat: `${loc.coords.latitude.toFixed(5)}° N`,
+              lng: `${loc.coords.longitude.toFixed(5)}° E`,
+              timestamp: new Date(loc.timestamp).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              }),
+            });
+          }
+        }
+      } catch (e) {
+        console.log("Auto-fetch initial GPS note:", e.message);
       }
     })();
   }, []);
@@ -509,11 +491,17 @@ export function useMainDashboard({ user, token, onLogout }) {
     let lat = null;
     let lng = null;
     try {
-      const loc = await Location.getCurrentPositionAsync({});
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
       lat = loc.coords.latitude;
       lng = loc.coords.longitude;
+      console.log(`[GPS DEBUG][DRIVER]
+latitude: ${lat}
+longitude: ${lng}
+accuracy: ${loc.coords.accuracy}
+timestamp: ${new Date(loc.timestamp).toISOString()}
+source: DriverApp-handleQRScan-STARTED`);
     } catch (locErr) {
-      console.log("GPS fetch failed:", locErr.message);
+      console.log("[GPS DEBUG][DRIVER] GPS fetch failed:", locErr.message);
     }
 
     let scannedStudentId = null;
@@ -561,8 +549,8 @@ export function useMainDashboard({ user, token, onLogout }) {
     });
 
     setScannedData({
-      lat: lat != null ? `${lat.toFixed(4)} N` : "GPS unavailable",
-      lng: lng != null ? `${lng.toFixed(4)} E` : "GPS unavailable",
+      lat: lat != null ? `${lat.toFixed(5)}° N` : "GPS unavailable",
+      lng: lng != null ? `${lng.toFixed(5)}° E` : "GPS unavailable",
       timestamp: resData.timestamp || nowStr,
     });
 
@@ -754,17 +742,30 @@ export function useMainDashboard({ user, token, onLogout }) {
   };
 
   const confirmLogout = () => {
+    const doLogout = async () => {
+      try {
+        await stopDriverTracking({
+          vehicleId: userVehicle,
+          driverId: userId,
+          socket: socketRef.current,
+        });
+      } catch (err) {
+        console.log("Error stopping tracking on logout:", err.message);
+      }
+      if (onLogout) {
+        onLogout();
+      }
+    };
+
     if (Platform.OS === "web") {
       const confirm = window.confirm("Are you sure you want to log out?");
       if (confirm) {
-        if (onLogout) {
-          onLogout();
-        }
+        doLogout();
       }
     } else {
       Alert.alert("Log Out", "Are you sure you want to log out?", [
         { text: "Cancel", style: "cancel" },
-        { text: "Log Out", style: "destructive", onPress: onLogout },
+        { text: "Log Out", style: "destructive", onPress: doLogout },
       ]);
     }
   };

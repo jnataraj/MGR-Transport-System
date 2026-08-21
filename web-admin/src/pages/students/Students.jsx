@@ -41,6 +41,8 @@ const Students = () => {
       rawImage,
       bus: user.vehicle || "Not Assigned",
       payment: user.paymentStatus || "Pending",
+      isOnline: !!user.isOnline,
+      lastSeenAt: user.lastSeenAt || null,
       details: {
         studentInfo: {
           rollNumber: user.rollNumber || user.id.substring(0, 8).toUpperCase(),
@@ -77,11 +79,22 @@ const Students = () => {
   };
 
   useEffect(() => {
-    const fetchStudents = async () => {
-      await loadStudents();
-    };
+    loadStudents();
 
-    fetchStudents();
+    const refresh = () => loadStudents();
+    socket.on("studentLocationUpdate", refresh);
+    socket.on("studentTransitCompleted", refresh);
+    socket.on("attendance_scanned", refresh);
+    socket.on("userUpdated", refresh);
+    socket.on("vehicleMembersUpdated", refresh);
+
+    return () => {
+      socket.off("studentLocationUpdate", refresh);
+      socket.off("studentTransitCompleted", refresh);
+      socket.off("attendance_scanned", refresh);
+      socket.off("userUpdated", refresh);
+      socket.off("vehicleMembersUpdated", refresh);
+    };
   }, []);
 
   const formatKey = (key) => {

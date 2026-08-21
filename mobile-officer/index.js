@@ -1,4 +1,5 @@
 import { registerRootComponent } from 'expo';
+import './src/services/driverTrackingService';
 
 import App from './App';
 

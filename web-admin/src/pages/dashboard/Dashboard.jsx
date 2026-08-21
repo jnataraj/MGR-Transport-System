@@ -237,6 +237,7 @@ const Dashboard = () => {
       const isDriverActive = (d) => {
         if (!d) return false;
         return (
+          d.isOnline === true ||
           liveSet.has(d.id) ||
           liveSet.has(d.vehicle) ||
           d.vehicleIds?.some((id) => liveSet.has(id)) ||
@@ -264,7 +265,21 @@ const Dashboard = () => {
 
       if (alertData && alertData.success !== false) {
         setAlertBreak(alertData);
-        setMissingAlerts(alertData.missingAlerts || []);
+        const rawAlerts = alertData.missingAlerts || [];
+        const seenActive = new Set();
+        const dedupedAlerts = [];
+        for (const m of rawAlerts) {
+          if (m.status === "ACTIVE") {
+            const key = `${m.studentId}_${m.vehicleId || m.vehicleNumber}`;
+            if (!seenActive.has(key)) {
+              seenActive.add(key);
+              dedupedAlerts.push(m);
+            }
+          } else {
+            dedupedAlerts.push(m);
+          }
+        }
+        setMissingAlerts(dedupedAlerts);
       } else {
         setAlertBreak({ routeAlerts: [], totals: { total: 0, route: 0, driver: 0, admin: 0, missing: 0 } });
         setMissingAlerts([]);
@@ -650,16 +665,30 @@ const Dashboard = () => {
   );
 
   const renderAlertsModal = () => {
-    const activeMissingCount = missingAlerts.filter((m) => m.status === "ACTIVE").length;
+    const seenActive = new Set();
+    const dedupedMissingAlerts = [];
+    for (const m of missingAlerts) {
+      if (m.status === "ACTIVE") {
+        const key = `${m.studentId}_${m.vehicleId || m.vehicleNumber}`;
+        if (!seenActive.has(key)) {
+          seenActive.add(key);
+          dedupedMissingAlerts.push(m);
+        }
+      } else {
+        dedupedMissingAlerts.push(m);
+      }
+    }
+    const activeMissingCount = dedupedMissingAlerts.filter((m) => m.status === "ACTIVE").length;
+
     const tabs = [
       {
         key: "all",
-        label: `All (${alertBreak?.totals?.total || (missingAlerts.length + routeAlerts.length + (alertBreak?.totals?.driver || 0) + (alertBreak?.totals?.admin || 0))})`,
+        label: `All (${alertBreak?.totals?.total || (dedupedMissingAlerts.length + routeAlerts.length + (alertBreak?.totals?.driver || 0) + (alertBreak?.totals?.admin || 0))})`,
         color: "#475569",
       },
       {
         key: "missing",
-        label: `Student Missing (${missingAlerts.length})`,
+        label: `Student Missing (${dedupedMissingAlerts.length})`,
         color: "#DC2626",
         badge: activeMissingCount > 0 ? `${activeMissingCount} ACTIVE` : null,
       },
@@ -700,7 +729,7 @@ const Dashboard = () => {
           {[
             {
               label: "Student Missing",
-              val: missingAlerts.length,
+              val: dedupedMissingAlerts.length,
               activeText: activeMissingCount > 0 ? `${activeMissingCount} Active` : null,
               color: "#DC2626",
               bg: "#FEF2F2",
@@ -794,7 +823,7 @@ const Dashboard = () => {
               )}
             </div>
             {renderList(
-              missingAlerts,
+              dedupedMissingAlerts,
               "No student missing alerts today ✅",
               (m) => {
                 const isActive = m.status === "ACTIVE";

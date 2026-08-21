@@ -39,6 +39,8 @@ const io = new Server(server, {
 
 app.set("io", io);
 
+const prisma = require("./prisma/prisma");
+
 // Track which vehicleId and driverId belong to which socket
 const socketVehicleMap = new Map();
 const socketDriverMap = new Map();
@@ -62,6 +64,12 @@ io.on("connection", (socket) => {
     const latitude = data.latitude ?? data.lat;
     const longitude = data.longitude ?? data.lng;
     if (latitude == null || longitude == null) return;
+
+    // Update student's lastSeenAt in DB
+    prisma.user.update({
+      where: { id: data.studentId },
+      data: { lastSeenAt: new Date() },
+    }).catch(() => {});
 
     try {
       await updateStudentLocation({
@@ -95,41 +103,74 @@ io.on("connection", (socket) => {
 
   // ── Driver Real-Time Location Update ──
   socket.on("driverLocationUpdate", async (data) => {
-    if (!data || !data.vehicleId) return;
-    socketVehicleMap.set(socket.id, data.vehicleId);
-    if (data.driverId || data.userId) {
-      socketDriverMap.set(socket.id, data.driverId || data.userId);
-    }
+    if (!data || (!data.vehicleId && !data.driverId && !data.userId)) return;
+    const driverId = data.driverId || data.userId;
+    const vehicleId = data.vehicleId;
+
+    if (vehicleId) socketVehicleMap.set(socket.id, vehicleId);
+    if (driverId) socketDriverMap.set(socket.id, driverId);
+
     const latitude = data.latitude ?? data.lat;
     const longitude = data.longitude ?? data.lng;
-    setVehicleLocation(data.vehicleId, latitude, longitude);
-    io.emit("busLocationChanged", { ...data, latitude, longitude });
+
+    // Update lastSeenAt in DB
+    if (driverId) {
+      prisma.user.update({
+        where: { id: driverId },
+        data: { lastSeenAt: new Date() },
+      }).catch(() => {});
+    }
+
+    if (latitude != null && longitude != null) {
+      setVehicleLocation(vehicleId || driverId, latitude, longitude, {
+        vehicleNumber: data.vehicleNumber,
+        driverId,
+        speed: data.speed,
+        heading: data.heading,
+        isHalted: data.isHalted,
+      });
+    }
+
+    io.emit("busLocationChanged", {
+      ...data,
+      latitude,
+      longitude,
+      lat: latitude,
+      lng: longitude,
+      timestamp: data.timestamp || new Date().toISOString(),
+    });
 
     // Compare with all active in-transit students on this vehicle
-    try {
-      await updateDriverLocation({
-        vehicleId: data.vehicleId,
-        driverId: data.driverId || data.userId,
-        driverName: data.driverName || data.name,
-        latitude,
-        longitude,
-        io,
-      });
-    } catch (err) {
-      console.error("Socket driverLocationUpdate proximity check error:", err.message);
+    if (vehicleId && latitude != null && longitude != null) {
+      try {
+        await updateDriverLocation({
+          vehicleId,
+          driverId,
+          driverName: data.driverName || data.name,
+          latitude,
+          longitude,
+          io,
+        });
+      } catch (err) {
+        console.error("Socket driverLocationUpdate proximity check error:", err.message);
+      }
     }
   });
 
+  // ── Explicit Driver Location Stopped (trip end / logout) ──
   socket.on("driverLocationStopped", async (data) => {
-    if (!data || !data.vehicleId) return;
+    if (!data) return;
+    const targetKey = data.vehicleId || data.driverId || data.userId;
+    if (!targetKey) return;
+
     socketVehicleMap.delete(socket.id);
     socketDriverMap.delete(socket.id);
-    clearVehicleLocation(data.vehicleId);
+    clearVehicleLocation(targetKey);
     io.emit("busLocationStopped", data);
 
     try {
       await endVehicleTransit({
-        vehicleId: data.vehicleId,
+        vehicleId: targetKey,
         reason: "Trip Stopped",
         io,
       });
@@ -138,26 +179,11 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("disconnect", async () => {
-    const vehicleId = socketVehicleMap.get(socket.id);
-    const driverId = socketDriverMap.get(socket.id);
-    if (vehicleId || driverId) {
-      if (vehicleId) {
-        clearVehicleLocation(vehicleId);
-        try {
-          await endVehicleTransit({
-            vehicleId,
-            reason: "Driver Disconnected",
-            io,
-          });
-        } catch (err) {
-          console.error("Disconnect endVehicleTransit error:", err.message);
-        }
-      }
-      io.emit("busLocationStopped", { vehicleId, driverId, reason: "disconnected" });
-      socketVehicleMap.delete(socket.id);
-      socketDriverMap.delete(socket.id);
-    }
+  // ── Socket Disconnect: Do NOT immediately mark driver offline / clear location ──
+  // Driver active status is governed by DRIVER_ACTIVE_TIMEOUT_MS via background heartbeats
+  socket.on("disconnect", () => {
+    socketVehicleMap.delete(socket.id);
+    socketDriverMap.delete(socket.id);
   });
 });
 
