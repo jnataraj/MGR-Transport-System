@@ -357,37 +357,47 @@ const Dashboard = () => {
       // Real-Time Student Missing Alerts
       socket.on("student_missing_alert", (alert) => {
         setMissingAlerts((prev) => {
-          const filtered = prev.filter((a) => a.id !== alert.id && a.studentId !== alert.studentId);
-          return [alert, ...filtered];
+          const index = prev.findIndex(
+            (a) => a.id === alert.id || (a.studentId && alert.studentId && a.studentId === alert.studentId)
+          );
+          if (index !== -1) {
+            const updated = [...prev];
+            updated[index] = { ...updated[index], ...alert };
+            return updated;
+          }
+          return [alert, ...prev];
         });
-        fetchAll();
       });
       socket.on("new_missing_alert", (alert) => {
         setMissingAlerts((prev) => {
-          const filtered = prev.filter((a) => a.id !== alert.id && a.studentId !== alert.studentId);
-          return [alert, ...filtered];
+          const index = prev.findIndex(
+            (a) => a.id === alert.id || (a.studentId && alert.studentId && a.studentId === alert.studentId)
+          );
+          if (index !== -1) {
+            const updated = [...prev];
+            updated[index] = { ...updated[index], ...alert };
+            return updated;
+          }
+          return [alert, ...prev];
         });
-        fetchAll();
       });
       socket.on("student_missing_alert_resolved", (res) => {
         setMissingAlerts((prev) =>
           prev.map((a) =>
-            a.id === res.id || a.studentId === res.studentId
+            a.id === res.id || (a.studentId && res.studentId && a.studentId === res.studentId)
               ? { ...a, status: "RESOLVED", resolvedReason: res.resolvedReason, resolvedAt: res.resolvedAt }
               : a
           )
         );
-        fetchAll();
       });
       socket.on("missing_alert_closed", (res) => {
         setMissingAlerts((prev) =>
           prev.map((a) =>
-            a.id === res.id || a.studentId === res.studentId
+            a.id === res.id || (a.studentId && res.studentId && a.studentId === res.studentId)
               ? { ...a, status: "RESOLVED", resolvedReason: res.resolvedReason, resolvedAt: res.resolvedAt }
               : a
           )
         );
-        fetchAll();
       });
       // Live transit updates — re-fetch stats for accurate student boarded count
       socket.on("studentTransitUpdate", () => fetchAll());
@@ -1295,18 +1305,35 @@ const Dashboard = () => {
               />
             )}
             {canSeeCard(user, "alertsRaised") && (() => {
-              const activeMissingCount = missingAlerts.filter((m) => m.status === "ACTIVE").length;
-              const hasActive = activeMissingCount > 0;
+              const activeMissingCount = missingAlerts.filter(
+                (m) => m.status === "ACTIVE"
+              ).length;
+
+              const alertsRaisedCount = alertsToday + activeMissingCount;
+              const hasActiveMissing = activeMissingCount > 0;
+
               return (
                 <StatCard
-                  icon={<Bell size={22} color={hasActive ? "#DC2626" : "#B91C1C"} />}
+                  icon={
+                    <Bell
+                      size={22}
+                      color={hasActiveMissing ? "#DC2626" : "#B91C1C"}
+                    />
+                  }
                   label="Alerts Raised"
-                  color={hasActive ? "#DC2626" : "#B91C1C"}
+                  color={hasActiveMissing ? "#DC2626" : "#B91C1C"}
                   bg="#FEE2E2"
-                  value={loading ? "…" : alertsToday}
-                  sub={hasActive ? `🚨 ${activeMissingCount} student missing!` : "Today — tap for split"}
-                  onClick={() => { setAlertTab(hasActive ? "missing" : "all"); setModal("alerts"); }}
-                  pulse={alertsToday > 0 || hasActive}
+                  value={loading ? "…" : alertsRaisedCount}
+                  sub={
+                    hasActiveMissing
+                      ? `🚨 ${activeMissingCount} student missing!`
+                      : "Today — tap for split"
+                  }
+                  onClick={() => {
+                    setAlertTab(hasActiveMissing ? "missing" : "all");
+                    setModal("alerts");
+                  }}
+                  pulse={alertsRaisedCount > 0}
                 />
               );
             })()}
@@ -1641,7 +1668,7 @@ const Dashboard = () => {
                           <br />
                           Status:{" "}
                           <strong style={{ color: pinColor }}>
-                            {idle ? "IDLE" : "MOVING"}
+                            {idle ? "STOP" : "MOVING"}
                           </strong>
                         </Popup>
                       </Marker>

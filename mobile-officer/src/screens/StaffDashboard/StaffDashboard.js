@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -62,16 +62,21 @@ const ACTION_DEFS = [
 
 // ── Notification row styling by type ──
 function notifVisuals(item) {
+  if (item.notificationType === "missing_alert") {
+    return { bg: "#DC2626", icon: TriangleAlert };
+  }
+  if (item.notificationType === "missing_alert_resolved") {
+    return { bg: "#16A34A", icon: Check };
+  }
+  if (item.notificationType === "RouteCancelled") {
+    return { bg: "#EF4444", icon: X };
+  }
   const isAlertType =
     item.notificationType === "maintenance" ||
     item.notificationType === "halt" ||
     item.notificationType === "broadcast" ||
-    item.notificationType === "RouteDelayed" ||
-    item.notificationType === "RouteCancelled";
+    item.notificationType === "RouteDelayed";
 
-  if (item.notificationType === "RouteCancelled") {
-    return { bg: "#EF4444", icon: X };
-  }
   if (isAlertType) {
     return { bg: "#F97316", icon: TriangleAlert };
   }
@@ -165,11 +170,13 @@ export default function StaffDashboard({ dashboard }) {
     tripStatus,
     setTripStatus,
     routeAlerts,
+    routeAlertHistory,
     unreadAlerts,
     setUnreadAlerts,
     showRouteAlertHistory,
     setShowRouteAlertHistory,
     handleNotificationAction,
+    markAllNotificationsAsRead,
 
     isHistoryModalOpen,
     setIsHistoryModalOpen,
@@ -192,6 +199,7 @@ export default function StaffDashboard({ dashboard }) {
     setShowProfileModal,
   } = dashboard;
 
+  const [alertModalTab, setAlertModalTab] = useState("unread"); // "unread" | "history"
   const isOnDuty = qrStatus === "STARTED";
   const now = new Date();
   const timeStr = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true });
@@ -213,8 +221,8 @@ export default function StaffDashboard({ dashboard }) {
       fetchMyHistory();
     },
     routeAlerts: () => {
+      setAlertModalTab(routeAlerts.length > 0 ? "unread" : "history");
       setShowRouteAlertHistory(true);
-      setUnreadAlerts(0);
     },
   };
 
@@ -231,7 +239,6 @@ export default function StaffDashboard({ dashboard }) {
     "canViewMyHistory",
     "canViewRouteAlerts",
   ];
-  // const visibleActions = ACTION_DEFS.filter((a) => MAIN_ACTION_KEYS.includes(a.key));
 
   const visibleActions =
     role?.toLowerCase() === "coordinator"
@@ -241,8 +248,8 @@ export default function StaffDashboard({ dashboard }) {
       : ACTION_DEFS.filter((a) =>
         MAIN_ACTION_KEYS.includes(a.key)
       );
-  // Keep Home compact so the page never needs vertical scrolling.
-  const previewAlerts = routeAlerts.slice(0, 1);
+  // Keep Home compact with unread preview
+  const previewAlerts = routeAlerts.slice(0, 2);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -261,8 +268,8 @@ export default function StaffDashboard({ dashboard }) {
         <TouchableOpacity
           style={styles.bellWrap}
           onPress={() => {
+            setAlertModalTab(routeAlerts.length > 0 ? "unread" : "history");
             setShowRouteAlertHistory(true);
-            setUnreadAlerts(0);
           }}
         >
           <Bell size={21} color="#1F2937" strokeWidth={2.3} />
@@ -336,35 +343,69 @@ export default function StaffDashboard({ dashboard }) {
         {/* ── Notifications ── */}
         <View style={styles.notifCard2}>
           <View style={styles.notifCard2Header}>
-            <Text style={styles.notifCard2Title}>NOTIFICATIONS</Text>
-            <TouchableOpacity onPress={() => { setShowRouteAlertHistory(true); setUnreadAlerts(0); }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Text style={styles.notifCard2Title}>NOTIFICATIONS</Text>
+              {unreadAlerts > 0 && (
+                <View
+                  style={{
+                    backgroundColor: "#EF4444",
+                    borderRadius: 10,
+                    paddingHorizontal: 7,
+                    paddingVertical: 1,
+                  }}
+                >
+                  <Text style={{ color: "#FFFFFF", fontSize: 10, fontWeight: "800" }}>
+                    {unreadAlerts}
+                  </Text>
+                </View>
+              )}
+            </View>
+            <TouchableOpacity onPress={() => {
+              setAlertModalTab(routeAlerts.length > 0 ? "unread" : "history");
+              setShowRouteAlertHistory(true);
+            }}>
               <Text style={styles.notifCard2ViewAll}>View All</Text>
             </TouchableOpacity>
           </View>
 
           {previewAlerts.length === 0 ? (
-            <Text style={styles.notifEmptyText}>No notifications right now.</Text>
+            <Text style={styles.notifEmptyText}>No unread notifications right now.</Text>
           ) : (
             previewAlerts.map((item, idx) => {
               const v = notifVisuals(item);
               const NotificationIcon = v.icon;
               return (
-                <View key={item.id || idx} style={styles.notifRow2}>
+                <TouchableOpacity
+                  key={item.id || idx}
+                  style={styles.notifRow2}
+                  activeOpacity={0.7}
+                  onPress={() => handleNotificationAction(item)}
+                >
                   <View style={[styles.notifIconCircle, { backgroundColor: v.bg }]}>
                     <NotificationIcon size={16} color="#FFFFFF" strokeWidth={2.5} />
                   </View>
                   <View style={styles.notifRow2Body}>
                     <Text style={styles.notifRow2Title} numberOfLines={1}>
-                      {item.routeName || "Update"}
+                      {item.routeName || item.title || "Update"}
                     </Text>
                     <Text style={styles.notifRow2Desc} numberOfLines={2}>
-                      {item.customMessage || "New notification received."}
+                      {item.customMessage || item.message || "New notification received."}
                     </Text>
                   </View>
-                  <Text style={styles.notifRow2Time}>
-                    {timeAgoLabel(item.receivedAt || item.timestamp)}
-                  </Text>
-                </View>
+                  <View style={{ alignItems: "flex-end", justifyContent: "center", gap: 4 }}>
+                    <Text style={styles.notifRow2Time}>
+                      {timeAgoLabel(item.receivedAt || item.timestamp)}
+                    </Text>
+                    <View
+                      style={{
+                        width: 7,
+                        height: 7,
+                        borderRadius: 4,
+                        backgroundColor: "#2563EB",
+                      }}
+                    />
+                  </View>
+                </TouchableOpacity>
               );
             })
           )}
@@ -372,7 +413,6 @@ export default function StaffDashboard({ dashboard }) {
 
       </View>
 
-      {/* Fixed bottom actions — always visible above BottomTabBar */}
       {/* <View style={styles.fixedBottomActions}>
         <TouchableOpacity style={styles.scanBigBtn} onPress={() => openCamera("QR")}>
           <QrCode size={19} color="#FFFFFF" strokeWidth={2.4} />
@@ -1318,216 +1358,555 @@ export default function StaffDashboard({ dashboard }) {
               style={{ flexDirection: "row", alignItems: "center", gap: 10 }}
             >
               <Bell size={18} color="#FFFFFF" strokeWidth={2.2} />
-              <Text style={[styles.modalTitle, { color: "#fff" }]}>Route Alerts</Text>
+              <Text style={[styles.modalTitle, { color: "#fff" }]}>Notifications & Alerts</Text>
             </View>
             <TouchableOpacity onPress={() => setShowRouteAlertHistory(false)}>
               <Text style={styles.modalCloseText}>CLOSE</Text>
             </TouchableOpacity>
           </View>
 
-          {routeAlerts.length === 0 ? (
-            <View
+          {/* Segmented Tabs */}
+          <View
+            style={{
+              flexDirection: "row",
+              backgroundColor: "#E2E8F0",
+              margin: 14,
+              borderRadius: 12,
+              padding: 4,
+            }}
+          >
+            <TouchableOpacity
               style={{
                 flex: 1,
+                paddingVertical: 8,
+                borderRadius: 9,
                 alignItems: "center",
-                justifyContent: "center",
+                backgroundColor: alertModalTab === "unread" ? "#FFFFFF" : "transparent",
+                shadowColor: alertModalTab === "unread" ? "#000" : "transparent",
+                shadowOpacity: alertModalTab === "unread" ? 0.08 : 0,
+                shadowRadius: 3,
+                elevation: alertModalTab === "unread" ? 2 : 0,
               }}
+              onPress={() => setAlertModalTab("unread")}
             >
-              <BellOff size={40} color="#94A3B8" strokeWidth={1.8} style={{ marginBottom: 12 }} />
-              <Text
-                style={{ fontWeight: "800", color: "#6B7280", fontSize: 14 }}
-              >
-                No route alerts yet
-              </Text>
-              <Text style={{ color: "#9CA3AF", fontSize: 12, marginTop: 4 }}>
-                Alerts from admin will appear here
-              </Text>
-            </View>
-          ) : (
-            <ScrollView style={{ flex: 1, padding: 16 }}>
               <Text
                 style={{
-                  fontSize: 11,
-                  fontWeight: "700",
-                  color: "#9CA3AF",
-                  letterSpacing: 1,
-                  marginBottom: 12,
-                  textTransform: "uppercase",
+                  fontSize: 13,
+                  fontWeight: "800",
+                  color: alertModalTab === "unread" ? "#2563EB" : "#64748B",
                 }}
               >
-                {routeAlerts.length} Alert{routeAlerts.length !== 1 ? "s" : ""}
+                Unread ({routeAlerts.length})
               </Text>
-              {routeAlerts.map((alert, idx) => {
-                const typeMap = {
-                  RouteDelayed: {
-                    icon: CalendarClock,
-                    label: "Route Delayed",
-                    bgColor: "#FFFBEB",
-                    leftColor: "#D97706",
-                    tagBg: "#FEF3C7",
-                    tagText: "#92400E",
-                  },
-                  RouteCancelled: {
-                    icon: X,
-                    label: "Route Cancelled",
-                    bgColor: "#FEF2F2",
-                    leftColor: "#DC2626",
-                    tagBg: "#FEE2E2",
-                    tagText: "#991B1B",
-                  },
-                  NewPath: {
-                    icon: Navigation,
-                    label: "New Path / Diversion",
-                    bgColor: "#EFF6FF",
-                    leftColor: "#2563EB",
-                    tagBg: "#DBEAFE",
-                    tagText: "#1D4ED8",
-                  },
-                  General: {
-                    icon: Bell,
-                    label: "Notice",
-                    bgColor: "#EFF6FF",
-                    leftColor: "#2563EB",
-                    tagBg: "#DBEAFE",
-                    tagText: "#1D4ED8",
-                  },
-                };
-                const t = typeMap[alert.notificationType] || {
-                  icon: Bell,
-                  label: alert.notificationType,
-                  bgColor: "#F9FAFB",
-                  leftColor: "#6B7280",
-                  tagBg: "#F3F4F6",
-                  tagText: "#374151",
-                };
-                const AlertTypeIcon = t.icon;
-                const dt = new Date(alert.receivedAt || alert.timestamp);
-                const isToday = dt.toDateString() === new Date().toDateString();
-                const timeStrAlert = dt.toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                });
-                const dateStrAlert = isToday
-                  ? "Today"
-                  : dt.toLocaleDateString([], { day: "numeric", month: "short" });
-                return (
-                  <View
-                    key={alert.id || idx}
+            </TouchableOpacity>
+          </View>
+
+          {alertModalTab === "unread" ? (
+            routeAlerts.length === 0 ? (
+              <View
+                style={{
+                  flex: 1,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: 20,
+                }}
+              >
+                <BellOff size={44} color="#94A3B8" strokeWidth={1.8} style={{ marginBottom: 12 }} />
+                <Text
+                  style={{ fontWeight: "800", color: "#475569", fontSize: 16 }}
+                >
+                  No unread notifications
+                </Text>
+                <Text style={{ color: "#94A3B8", fontSize: 13, marginTop: 4, textAlign: "center", maxWidth: 260 }}>
+                  You have read all active notifications.
+                </Text>
+                <TouchableOpacity
+                  style={{
+                    marginTop: 18,
+                    paddingHorizontal: 18,
+                    paddingVertical: 10,
+                    backgroundColor: "#EFF6FF",
+                    borderRadius: 10,
+                    borderWidth: 1,
+                    borderColor: "#BFDBFE",
+                  }}
+                  onPress={() => setAlertModalTab("history")}
+                >
+                  <Text style={{ color: "#2563EB", fontWeight: "700", fontSize: 13 }}>
+                    View Notification History
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <ScrollView style={{ flex: 1, paddingHorizontal: 16 }}>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginBottom: 12,
+                  }}
+                >
+                  <Text
                     style={{
-                      backgroundColor: t.bgColor,
-                      borderRadius: 16,
-                      marginBottom: 14,
-                      borderLeftWidth: 5,
-                      borderLeftColor: t.leftColor,
-                      shadowColor: "#000",
-                      shadowOpacity: 0.05,
-                      shadowRadius: 5,
-                      elevation: 2,
-                      overflow: "hidden",
+                      fontSize: 11,
+                      fontWeight: "700",
+                      color: "#9CA3AF",
+                      letterSpacing: 1,
+                      textTransform: "uppercase",
                     }}
                   >
-                    <View style={{ padding: 14 }}>
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          marginBottom: 10,
-                        }}
-                      >
+                    {routeAlerts.length} Unread Notification{routeAlerts.length !== 1 ? "s" : ""}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={markAllNotificationsAsRead}
+                    style={{
+                      backgroundColor: "#EFF6FF",
+                      paddingHorizontal: 10,
+                      paddingVertical: 4,
+                      borderRadius: 8,
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, fontWeight: "700", color: "#2563EB" }}>
+                      Mark all as read
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {routeAlerts.map((alert, idx) => {
+                  const typeMap = {
+                    missing_alert: {
+                      icon: TriangleAlert,
+                      label: "Student Missing Alert",
+                      bgColor: "#FEF2F2",
+                      leftColor: "#DC2626",
+                      tagBg: "#FEE2E2",
+                      tagText: "#991B1B",
+                    },
+                    missing_alert_resolved: {
+                      icon: Check,
+                      label: "Missing Alert Resolved",
+                      bgColor: "#F0FDF4",
+                      leftColor: "#16A34A",
+                      tagBg: "#DCFCE7",
+                      tagText: "#15803D",
+                    },
+                    RouteDelayed: {
+                      icon: CalendarClock,
+                      label: "Route Delayed",
+                      bgColor: "#FFFBEB",
+                      leftColor: "#D97706",
+                      tagBg: "#FEF3C7",
+                      tagText: "#92400E",
+                    },
+                    RouteCancelled: {
+                      icon: X,
+                      label: "Route Cancelled",
+                      bgColor: "#FEF2F2",
+                      leftColor: "#DC2626",
+                      tagBg: "#FEE2E2",
+                      tagText: "#991B1B",
+                    },
+                    NewPath: {
+                      icon: Navigation,
+                      label: "Route Diversion",
+                      bgColor: "#EFF6FF",
+                      leftColor: "#2563EB",
+                      tagBg: "#DBEAFE",
+                      tagText: "#1D4ED8",
+                    },
+                    RouteChange: {
+                      icon: Navigation,
+                      label: "Route Change",
+                      bgColor: "#EFF6FF",
+                      leftColor: "#2563EB",
+                      tagBg: "#DBEAFE",
+                      tagText: "#1D4ED8",
+                    },
+                    General: {
+                      icon: Bell,
+                      label: "Notice",
+                      bgColor: "#EFF6FF",
+                      leftColor: "#2563EB",
+                      tagBg: "#DBEAFE",
+                      tagText: "#1D4ED8",
+                    },
+                  };
+                  const t = typeMap[alert.notificationType] || {
+                    icon: Bell,
+                    label: alert.notificationType || "Notice",
+                    bgColor: "#F9FAFB",
+                    leftColor: "#6B7280",
+                    tagBg: "#F3F4F6",
+                    tagText: "#374151",
+                  };
+                  const AlertTypeIcon = t.icon;
+                  const dt = new Date(alert.receivedAt || alert.timestamp || Date.now());
+                  const isToday = dt.toDateString() === new Date().toDateString();
+                  const timeStrAlert = dt.toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  });
+                  const dateStrAlert = isToday
+                    ? "Today"
+                    : dt.toLocaleDateString([], { day: "numeric", month: "short" });
+
+                  return (
+                    <TouchableOpacity
+                      key={alert.id || idx}
+                      activeOpacity={0.8}
+                      onPress={() => handleNotificationAction(alert)}
+                      style={{
+                        backgroundColor: t.bgColor,
+                        borderRadius: 16,
+                        marginBottom: 14,
+                        borderLeftWidth: 5,
+                        borderLeftColor: t.leftColor,
+                        shadowColor: "#000",
+                        shadowOpacity: 0.05,
+                        shadowRadius: 5,
+                        elevation: 2,
+                        overflow: "hidden",
+                      }}
+                    >
+                      <View style={{ padding: 14 }}>
                         <View
                           style={{
-                            backgroundColor: t.tagBg,
-                            borderRadius: 8,
-                            paddingHorizontal: 10,
-                            paddingVertical: 4,
                             flexDirection: "row",
                             alignItems: "center",
-                            gap: 5,
+                            justifyContent: "space-between",
+                            marginBottom: 8,
                           }}
                         >
-                          <AlertTypeIcon size={14} color={t.tagText} strokeWidth={2.2} />
-                          <Text
-                            style={{ fontWeight: "900", fontSize: 12, color: t.tagText }}
+                          <View
+                            style={{
+                              backgroundColor: t.tagBg,
+                              borderRadius: 8,
+                              paddingHorizontal: 10,
+                              paddingVertical: 4,
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 5,
+                            }}
                           >
-                            {t.label}
-                          </Text>
+                            <AlertTypeIcon size={14} color={t.tagText} strokeWidth={2.2} />
+                            <Text
+                              style={{ fontWeight: "900", fontSize: 12, color: t.tagText }}
+                            >
+                              {t.label}
+                            </Text>
+                          </View>
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                            <Text
+                              style={{ fontSize: 11, color: "#9CA3AF", fontWeight: "600" }}
+                            >
+                              {dateStrAlert} {timeStrAlert}
+                            </Text>
+                            <View
+                              style={{
+                                width: 8,
+                                height: 8,
+                                borderRadius: 4,
+                                backgroundColor: "#2563EB",
+                              }}
+                            />
+                          </View>
                         </View>
                         <Text
-                          style={{ fontSize: 10, color: "#9CA3AF", fontWeight: "600" }}
+                          style={{
+                            fontSize: 15,
+                            fontWeight: "900",
+                            color: "#111827",
+                            marginBottom: 4,
+                          }}
                         >
-                          {dateStrAlert} {timeStrAlert}
+                          {alert.routeName || alert.title || "Notification"}
                         </Text>
+                        {(alert.effectiveDate || alert.effectiveTime) && (
+                          <Text
+                            style={{
+                              fontSize: 12,
+                              color: "#6B7280",
+                              fontWeight: "600",
+                              marginBottom: 8,
+                            }}
+                          >
+                            Effective: {alert.effectiveDate} {alert.effectiveTime ? `at ${alert.effectiveTime}` : ""}
+                            {alert.duration ? `  ·  ${alert.duration}` : ""}
+                          </Text>
+                        )}
+                        {(alert.customMessage || alert.message || alert.updatedRoute) && (
+                          <View
+                            style={{
+                              backgroundColor: "rgba(255,255,255,0.85)",
+                              borderRadius: 8,
+                              padding: 10,
+                              borderLeftWidth: 2,
+                              borderLeftColor: t.leftColor,
+                            }}
+                          >
+                            <Text
+                              style={{ fontSize: 13, color: "#374151", lineHeight: 20 }}
+                            >
+                              {alert.customMessage || alert.message || alert.updatedRoute}
+                            </Text>
+                          </View>
+                        )}
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            marginTop: 10,
+                          }}
+                        >
+                          <Text style={{ fontSize: 10, color: "#2563EB", fontWeight: "700" }}>
+                            Tap to mark as read & clear
+                          </Text>
+                          <Text style={{ fontSize: 10, color: "#059669", fontWeight: "700" }}>
+                            Unread
+                          </Text>
+                        </View>
                       </View>
-                      <Text
-                        style={{
-                          fontSize: 15,
-                          fontWeight: "900",
-                          color: "#111827",
-                          marginBottom: 4,
-                        }}
-                      >
-                        {alert.routeName}
-                      </Text>
-                      <Text
-                        style={{
-                          fontSize: 12,
-                          color: "#6B7280",
-                          fontWeight: "600",
-                          marginBottom: 8,
-                        }}
-                      >
-                        Effective: {alert.effectiveDate} at {alert.effectiveTime}
-                        {alert.duration ? `  ·  ${alert.duration}` : ""}
-                      </Text>
-                      {(alert.customMessage || alert.updatedRoute) && (
+                    </TouchableOpacity>
+                  );
+                })}
+                <View style={{ height: 20 }} />
+              </ScrollView>
+            )
+          ) : (
+            /* History Tab */
+            routeAlertHistory.length === 0 ? (
+              <View
+                style={{
+                  flex: 1,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: 20,
+                }}
+              >
+                <BellOff size={40} color="#94A3B8" strokeWidth={1.8} style={{ marginBottom: 12 }} />
+                <Text
+                  style={{ fontWeight: "800", color: "#6B7280", fontSize: 14 }}
+                >
+                  No notification history yet
+                </Text>
+                <Text style={{ color: "#9CA3AF", fontSize: 12, marginTop: 4 }}>
+                  Historical alerts and notices will be preserved here.
+                </Text>
+              </View>
+            ) : (
+              <ScrollView style={{ flex: 1, paddingHorizontal: 16 }}>
+                <Text
+                  style={{
+                    fontSize: 11,
+                    fontWeight: "700",
+                    color: "#9CA3AF",
+                    letterSpacing: 1,
+                    marginBottom: 12,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {routeAlertHistory.length} Total Historical Record{routeAlertHistory.length !== 1 ? "s" : ""}
+                </Text>
+                {routeAlertHistory.map((alert, idx) => {
+                  const typeMap = {
+                    missing_alert: {
+                      icon: TriangleAlert,
+                      label: "Student Missing Alert",
+                      bgColor: "#FEF2F2",
+                      leftColor: "#DC2626",
+                      tagBg: "#FEE2E2",
+                      tagText: "#991B1B",
+                    },
+                    missing_alert_resolved: {
+                      icon: Check,
+                      label: "Missing Alert Resolved",
+                      bgColor: "#F0FDF4",
+                      leftColor: "#16A34A",
+                      tagBg: "#DCFCE7",
+                      tagText: "#15803D",
+                    },
+                    RouteDelayed: {
+                      icon: CalendarClock,
+                      label: "Route Delayed",
+                      bgColor: "#FFFBEB",
+                      leftColor: "#D97706",
+                      tagBg: "#FEF3C7",
+                      tagText: "#92400E",
+                    },
+                    RouteCancelled: {
+                      icon: X,
+                      label: "Route Cancelled",
+                      bgColor: "#FEF2F2",
+                      leftColor: "#DC2626",
+                      tagBg: "#FEE2E2",
+                      tagText: "#991B1B",
+                    },
+                    NewPath: {
+                      icon: Navigation,
+                      label: "New Path / Diversion",
+                      bgColor: "#EFF6FF",
+                      leftColor: "#2563EB",
+                      tagBg: "#DBEAFE",
+                      tagText: "#1D4ED8",
+                    },
+                    RouteChange: {
+                      icon: Navigation,
+                      label: "Route Change",
+                      bgColor: "#EFF6FF",
+                      leftColor: "#2563EB",
+                      tagBg: "#DBEAFE",
+                      tagText: "#1D4ED8",
+                    },
+                    General: {
+                      icon: Bell,
+                      label: "Notice",
+                      bgColor: "#EFF6FF",
+                      leftColor: "#2563EB",
+                      tagBg: "#DBEAFE",
+                      tagText: "#1D4ED8",
+                    },
+                  };
+                  const t = typeMap[alert.notificationType] || {
+                    icon: Bell,
+                    label: alert.notificationType || "Notice",
+                    bgColor: "#F9FAFB",
+                    leftColor: "#6B7280",
+                    tagBg: "#F3F4F6",
+                    tagText: "#374151",
+                  };
+                  const AlertTypeIcon = t.icon;
+                  const dt = new Date(alert.receivedAt || alert.createdAt || Date.now());
+                  const isToday = dt.toDateString() === new Date().toDateString();
+                  const timeStrAlert = dt.toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  });
+                  const dateStrAlert = isToday
+                    ? "Today"
+                    : dt.toLocaleDateString([], { day: "numeric", month: "short" });
+                  return (
+                    <View
+                      key={alert.id || idx}
+                      style={{
+                        backgroundColor: t.bgColor,
+                        borderRadius: 16,
+                        marginBottom: 14,
+                        borderLeftWidth: 5,
+                        borderLeftColor: t.leftColor,
+                        shadowColor: "#000",
+                        shadowOpacity: 0.05,
+                        shadowRadius: 5,
+                        elevation: 2,
+                        overflow: "hidden",
+                      }}
+                    >
+                      <View style={{ padding: 14 }}>
                         <View
                           style={{
-                            backgroundColor: "rgba(255,255,255,0.8)",
-                            borderRadius: 8,
-                            padding: 10,
-                            borderLeftWidth: 2,
-                            borderLeftColor: t.leftColor,
+                            flexDirection: "row",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            marginBottom: 8,
                           }}
                         >
-                          <Text
-                            style={{ fontSize: 13, color: "#374151", lineHeight: 20 }}
+                          <View
+                            style={{
+                              backgroundColor: t.tagBg,
+                              borderRadius: 8,
+                              paddingHorizontal: 10,
+                              paddingVertical: 4,
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 5,
+                            }}
                           >
-                            {alert.customMessage || alert.updatedRoute}
+                            <AlertTypeIcon size={14} color={t.tagText} strokeWidth={2.2} />
+                            <Text
+                              style={{ fontWeight: "900", fontSize: 12, color: t.tagText }}
+                            >
+                              {t.label}
+                            </Text>
+                          </View>
+                          <Text
+                            style={{ fontSize: 10, color: "#9CA3AF", fontWeight: "600" }}
+                          >
+                            {dateStrAlert} {timeStrAlert}
                           </Text>
                         </View>
-                      )}
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          marginTop: 10,
-                          gap: 6,
-                        }}
-                      >
+                        <Text
+                          style={{
+                            fontSize: 15,
+                            fontWeight: "900",
+                            color: "#111827",
+                            marginBottom: 4,
+                          }}
+                        >
+                          {alert.routeName || alert.title || "Notification"}
+                        </Text>
+                        {(alert.effectiveDate || alert.effectiveTime) && (
+                          <Text
+                            style={{
+                              fontSize: 12,
+                              color: "#6B7280",
+                              fontWeight: "600",
+                              marginBottom: 8,
+                            }}
+                          >
+                            Effective: {alert.effectiveDate} {alert.effectiveTime ? `at ${alert.effectiveTime}` : ""}
+                            {alert.duration ? `  ·  ${alert.duration}` : ""}
+                          </Text>
+                        )}
+                        {(alert.customMessage || alert.message || alert.updatedRoute) && (
+                          <View
+                            style={{
+                              backgroundColor: "rgba(255,255,255,0.8)",
+                              borderRadius: 8,
+                              padding: 10,
+                              borderLeftWidth: 2,
+                              borderLeftColor: t.leftColor,
+                            }}
+                          >
+                            <Text
+                              style={{ fontSize: 13, color: "#374151", lineHeight: 20 }}
+                            >
+                              {alert.customMessage || alert.message || alert.updatedRoute}
+                            </Text>
+                          </View>
+                        )}
                         <View
                           style={{
-                            width: 7,
-                            height: 7,
-                            borderRadius: 4,
-                            backgroundColor: "#10B981",
+                            flexDirection: "row",
+                            alignItems: "center",
+                            marginTop: 10,
+                            gap: 6,
                           }}
-                        />
-                        <Text
-                          style={{ fontSize: 10, color: "#059669", fontWeight: "700" }}
                         >
-                          Sent by Transport Admin ·{" "}
-                          {alert.totalAffected
-                            ? `${alert.totalAffected} notified`
-                            : "All route members notified"}
-                        </Text>
+                          <View
+                            style={{
+                              width: 7,
+                              height: 7,
+                              borderRadius: 4,
+                              backgroundColor: "#10B981",
+                            }}
+                          />
+                          <Text
+                            style={{ fontSize: 10, color: "#059669", fontWeight: "700" }}
+                          >
+                            Historical Record ·{" "}
+                            {alert.totalAffected
+                              ? `${alert.totalAffected} notified`
+                              : "Transport System"}
+                          </Text>
+                        </View>
                       </View>
                     </View>
-                  </View>
-                );
-              })}
-              <View style={{ height: 20 }} />
-            </ScrollView>
+                  );
+                })}
+                <View style={{ height: 20 }} />
+              </ScrollView>
+            )
           )}
         </SafeAreaView>
       </Modal>

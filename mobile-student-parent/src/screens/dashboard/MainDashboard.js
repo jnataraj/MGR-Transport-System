@@ -98,7 +98,17 @@ export default function MainDashboard({ user, token, onLogout }) {
           <LiveBusTrackingModal
             visible={dashboard.liveMapVisible}
             onClose={() => dashboard.setLiveMapVisible(false)}
-            user={user}
+            user={
+              role === "parent" && dashboard.attendance?.childProfile
+                ? {
+                    ...user,
+                    vehicle: dashboard.attendance.childProfile.vehicle || user?.vehicle,
+                    vehicleId: dashboard.attendance.childProfile.vehicleId || dashboard.attendance.childProfile.vehicle || user?.vehicleId,
+                    route: dashboard.attendance.childProfile.route || user?.route,
+                    driverName: dashboard.attendance.childProfile.driverName || user?.driverName,
+                  }
+                : user
+            }
             token={token}
             socketRef={dashboard.socketRef}
             userRole={role}

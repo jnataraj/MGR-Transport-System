@@ -10,11 +10,20 @@ import {
   Linking,
   SafeAreaView,
 } from "react-native";
-import { X, Bus, ExternalLink, RefreshCw } from "lucide-react-native";
+import {
+  X,
+  Bus,
+  ExternalLink,
+  RefreshCw,
+  MapPin,
+  Navigation,
+  Compass,
+  AlertTriangle,
+} from "lucide-react-native";
 import * as Location from "expo-location";
 import { API_BASE } from "../api/client";
 
-// Safely resolve react-native-maps
+// Safely resolve react-native-maps without native crashes
 let MapView = null;
 let Marker = null;
 let PROVIDER_GOOGLE = undefined;
@@ -24,14 +33,25 @@ if (Platform.OS !== "web") {
     const Maps = require("react-native-maps");
     MapView = Maps.default || Maps;
     Marker = Maps.Marker || (Maps.default && Maps.default.Marker);
-    PROVIDER_GOOGLE = Maps.PROVIDER_GOOGLE || (Maps.default && Maps.default.PROVIDER_GOOGLE);
+    // Only pass PROVIDER_GOOGLE on Android if available.
+    // NEVER pass PROVIDER_GOOGLE on iOS unless Google Maps iOS Pod is explicitly linked,
+    // otherwise iOS throws SIGABRT and terminates the app.
+    if (Platform.OS === "android") {
+      PROVIDER_GOOGLE = Maps.PROVIDER_GOOGLE || (Maps.default && Maps.default.PROVIDER_GOOGLE);
+    }
   } catch (err) {
     console.warn("[LiveBusTrackingModal] react-native-maps not available:", err);
   }
 }
 
 /** How long (ms) without a GPS ping before we show the bus as offline */
-const OFFLINE_THRESHOLD_MS = 45_000;
+const OFFLINE_THRESHOLD_MS = 60_000;
+
+// Campus / fallback coordinates (Chennai / MGR University)
+const DEFAULT_COORDS = {
+  latitude: 13.0382,
+  longitude: 80.1780,
+};
 
 // Safe coordinate parser
 const parseCoord = (val) => {
@@ -39,6 +59,22 @@ const parseCoord = (val) => {
   const num = typeof val === "number" ? val : parseFloat(val);
   return Number.isFinite(num) ? num : null;
 };
+
+// Calculate distance in km
+function calculateDistanceKm(lat1, lon1, lat2, lon2) {
+  if (!lat1 || !lon1 || !lat2 || !lon2) return null;
+  const R = 6371; // Earth's radius in km
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+    Math.cos((lat2 * Math.PI) / 180) *
+    Math.sin(dLon / 2) *
+    Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return (R * c).toFixed(1);
+}
 
 // Error Boundary to prevent any native map crash from closing the app
 class MapErrorBoundary extends Component {
@@ -52,18 +88,22 @@ class MapErrorBoundary extends Component {
   }
 
   componentDidCatch(error, errorInfo) {
-    console.warn("[LiveBusTrackingModal] Map crashed:", error, errorInfo);
+    console.warn("[LiveBusTrackingModal] Map rendering caught error:", error, errorInfo);
   }
 
   render() {
     if (this.state.hasError) {
       return this.props.fallback ? (
-        this.props.fallback(this.state.error, () => this.setState({ hasError: false, error: null }))
+        this.props.fallback(this.state.error, () =>
+          this.setState({ hasError: false, error: null })
+        )
       ) : (
         <View style={styles.centreBox}>
           <Text style={{ fontSize: 42, marginBottom: 12 }}>🗺️</Text>
-          <Text style={styles.errorTitle}>Map Display Unavailable</Text>
-          <Text style={styles.errorBody}>Could not render the interactive map on this device.</Text>
+          <Text style={styles.errorTitle}>Map Display Fallback</Text>
+          <Text style={styles.errorBody}>
+            Interactive map view is unavailable. You can still track your bus and open live directions below.
+          </Text>
         </View>
       );
     }
@@ -85,14 +125,20 @@ export default function LiveBusTrackingModal({
   const [busLocation, setBusLocation] = useState(null); // { latitude, longitude, updatedAt }
   const [myLocation, setMyLocation] = useState(null);   // student's own GPS
   const [error, setError] = useState(null);
-  // ── Gating conditions ─────────────────────────────────────────────────────
-  const [driverActive, setDriverActive] = useState(null);  // null = not yet fetched
-  const [driverOnDuty, setDriverOnDuty] = useState(false); // true only when STARTED scan today
+  const [driverActive, setDriverActive] = useState(null);
+  const [driverOnDuty, setDriverOnDuty] = useState(false);
+  const [driverName, setDriverName] = useState(user?.driverName || null);
+  const [nativeMapFailed, setNativeMapFailed] = useState(false);
+
   const mapRef = useRef(null);
+  const mapReadyRef = useRef(false);
   const offlineTimerRef = useRef(null);
-  const assignedVehicleId = user?.vehicleId || user?.vehicle || null;
-  const vehicleNumber = user?.vehicle || user?.vehicleId || null;
-  const routeLabel = user?.route || "—";
+
+  // Resolve assigned vehicle & route reliably from user or parent's child profile
+  const assignedVehicleId =
+    user?.vehicleId || user?.vehicle || user?.assignedVehicle || user?.busNumber || null;
+  const vehicleNumber = user?.vehicle || user?.vehicleId || assignedVehicleId || "Bus";
+  const routeLabel = user?.route || "Standard Route";
 
   const authHeaders = {
     "Content-Type": "application/json",
@@ -102,40 +148,45 @@ export default function LiveBusTrackingModal({
   // ── Fetch initial snapshot from REST ──────────────────────────────────────
   const fetchInitialLocation = useCallback(async () => {
     if (!assignedVehicleId) {
-      // Student not assigned to any bus — no need to call the API
       return;
     }
     setLoading(true);
     setError(null);
     try {
       const res = await fetch(
-        `${API_BASE}/api/attendance/bus-location?vehicleId=${encodeURIComponent(assignedVehicleId)}`,
-        { headers: authHeaders },
+        `${API_BASE}/api/attendance/bus-location?vehicleId=${encodeURIComponent(
+          assignedVehicleId
+        )}`,
+        { headers: authHeaders }
       );
       const data = await res.json();
       if (data.success) {
         setBusOnline(!!data.online);
-        // Store driver gating flags from the enriched response
-        setDriverActive(data.driverActive ?? null);
+        setDriverActive(data.driverActive ?? true);
         setDriverOnDuty(!!data.driverOnDuty);
-        // Only store location when driver is active+onduty and coords are valid
-        if (data.driverActive && data.driverOnDuty && data.location) {
+
+        if (data.location) {
           const lat = parseCoord(data.location.latitude);
           const lng = parseCoord(data.location.longitude);
           if (lat !== null && lng !== null) {
-            setBusLocation({
+            const locObj = {
               latitude: lat,
               longitude: lng,
               updatedAt: new Date(data.location.updatedAt || Date.now()),
-            });
+            };
+            setBusLocation(locObj);
+            if (mapReadyRef.current && mapRef.current?.animateToRegion) {
+              animateToBus(locObj);
+            }
           }
-        } else {
-          setBusLocation(null);
         }
+      } else {
+        // Vehicle might not have active live GPS yet
+        setBusOnline(false);
       }
     } catch (err) {
       console.log("[LiveBusTrackingModal] fetch error:", err.message);
-      setError("Could not reach server. Check your connection.");
+      setError("Could not reach transport server. Check connection.");
     } finally {
       setLoading(false);
     }
@@ -158,25 +209,25 @@ export default function LiveBusTrackingModal({
         }
       }
     } catch {
-      // GPS unavailable — no "my location" dot shown, that's fine
+      // GPS permission denied or disabled — no student dot shown
     }
   }, []);
 
   // ── Auto-animate map to bus position ──────────────────────────────────────
   const animateToBus = useCallback((coords) => {
-    if (mapRef.current && coords && Platform.OS !== "web") {
+    if (mapRef.current && coords && Platform.OS !== "web" && mapReadyRef.current) {
       const lat = parseCoord(coords.latitude);
       const lng = parseCoord(coords.longitude);
-      if (lat !== null && lng !== null && mapRef.current.animateToRegion) {
+      if (lat !== null && lng !== null && typeof mapRef.current.animateToRegion === "function") {
         try {
           mapRef.current.animateToRegion(
             {
               latitude: lat,
               longitude: lng,
-              latitudeDelta: 0.005,
-              longitudeDelta: 0.005,
+              latitudeDelta: 0.008,
+              longitudeDelta: 0.008,
             },
-            600,
+            600
           );
         } catch (err) {
           console.warn("[LiveBusTrackingModal] animateToRegion error:", err);
@@ -195,20 +246,27 @@ export default function LiveBusTrackingModal({
 
   // ── Effect: initialise on modal open ─────────────────────────────────────
   useEffect(() => {
-    if (!visible) return;
+    if (!visible) {
+      mapReadyRef.current = false;
+      return;
+    }
     setBusLocation(null);
     setMyLocation(null);
     setBusOnline(false);
     setError(null);
     setDriverActive(null);
     setDriverOnDuty(false);
+    setNativeMapFailed(false);
+    if (user?.driverName) setDriverName(user.driverName);
+
     fetchInitialLocation();
     fetchMyLocation();
 
     return () => {
       if (offlineTimerRef.current) clearTimeout(offlineTimerRef.current);
+      mapReadyRef.current = false;
     };
-  }, [visible]);
+  }, [visible, user]);
 
   // ── Effect: socket listeners ───────────────────────────────────────────────
   useEffect(() => {
@@ -217,18 +275,17 @@ export default function LiveBusTrackingModal({
 
     const handleLocationUpdate = (data) => {
       if (!data || !data.vehicleId) return;
-      // Only process updates for OUR assigned vehicle
       const isMyBus =
-        data.vehicleId === assignedVehicleId ||
-        data.vehicleId === user?.vehicle ||
-        data.vehicleId === user?.vehicleId;
+        String(data.vehicleId).trim() === String(assignedVehicleId).trim() ||
+        String(data.vehicleId).trim() === String(vehicleNumber).trim() ||
+        String(data.vehicleNumber || "").trim() === String(vehicleNumber).trim();
+
       if (!isMyBus) return;
 
       const lat = parseCoord(data.latitude ?? data.lat);
       const lng = parseCoord(data.longitude ?? data.lng);
       if (lat === null || lng === null) return;
 
-      // Socket update means driver IS on duty and sending live GPS
       setDriverOnDuty(true);
       const newCoords = {
         latitude: lat,
@@ -244,9 +301,8 @@ export default function LiveBusTrackingModal({
     const handleLocationStopped = (data) => {
       if (!data || !data.vehicleId) return;
       const isMyBus =
-        data.vehicleId === assignedVehicleId ||
-        data.vehicleId === user?.vehicle ||
-        data.vehicleId === user?.vehicleId;
+        String(data.vehicleId).trim() === String(assignedVehicleId).trim() ||
+        String(data.vehicleId).trim() === String(vehicleNumber).trim();
       if (!isMyBus) return;
       setBusOnline(false);
       if (offlineTimerRef.current) clearTimeout(offlineTimerRef.current);
@@ -259,7 +315,7 @@ export default function LiveBusTrackingModal({
       socket.off("busLocationChanged", handleLocationUpdate);
       socket.off("busLocationStopped", handleLocationStopped);
     };
-  }, [visible, socketRef, assignedVehicleId]);
+  }, [visible, socketRef, assignedVehicleId, vehicleNumber, animateToBus, resetOfflineTimer]);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   const formatTime = (date) => {
@@ -269,206 +325,270 @@ export default function LiveBusTrackingModal({
   };
 
   const openInGoogleMaps = () => {
-    if (!busLocation) return;
-    const url = `https://www.google.com/maps?q=${busLocation.latitude},${busLocation.longitude}`;
-    Linking.openURL(url).catch(() => { });
+    const targetLat = busLat || DEFAULT_COORDS.latitude;
+    const targetLng = busLng || DEFAULT_COORDS.longitude;
+    const label = encodeURIComponent(`Bus ${vehicleNumber}`);
+    const url = Platform.select({
+      ios: `maps:0,0?q=${label}@${targetLat},${targetLng}`,
+      android: `geo:0,0?q=${targetLat},${targetLng}(${label})`,
+      default: `https://www.google.com/maps?q=${targetLat},${targetLng}`,
+    });
+    Linking.openURL(url).catch(() => {
+      Linking.openURL(`https://www.google.com/maps?q=${targetLat},${targetLng}`);
+    });
   };
 
-  // ── Render guard: HoD should never see this ───────────────────────────────
   if (userRole === "hod") return null;
 
-  // ── Four-condition gating ─────────────────────────────────────────────────
-  // Condition 1: student must have an assigned bus/vehicle
   const isAssigned = !!assignedVehicleId;
-  // Condition 2: driver account must be Active (null = still loading)
-  const isDriverActive = driverActive === true;
-  // Condition 3: driver must be OnDuty (STARTED scan today)
-  const isDriverOnDuty = driverOnDuty;
-  // Condition 4: valid live GPS coordinates
   const busLat = parseCoord(busLocation?.latitude);
   const busLng = parseCoord(busLocation?.longitude);
   const hasValidBusCoords = busLat !== null && busLng !== null;
 
-  // Only build a region when we have real coordinates — no hardcoded fallback
-  const initialRegion = hasValidBusCoords
-    ? {
-      latitude: busLat,
-      longitude: busLng,
-      latitudeDelta: 0.005,
-      longitudeDelta: 0.005,
-    }
-    : null;
+  // Region is always safely initialized with valid coordinates
+  const activeRegion = {
+    latitude: busLat || parseCoord(myLocation?.latitude) || DEFAULT_COORDS.latitude,
+    longitude: busLng || parseCoord(myLocation?.longitude) || DEFAULT_COORDS.longitude,
+    latitudeDelta: 0.015,
+    longitudeDelta: 0.015,
+  };
 
-  // ── Native map error boundary fallback ────────────────────────────────────
-  const renderNativeFallback = (customErr, retry) => (
-    <View style={styles.centreBox}>
-      <Text style={{ fontSize: 42, marginBottom: 12 }}>🗺️</Text>
-      <Text style={styles.errorTitle}>Map Unavailable</Text>
-      <Text style={styles.errorBody}>Could not display the interactive map on this device.</Text>
+  const distanceKm =
+    hasValidBusCoords && myLocation
+      ? calculateDistanceKm(
+        myLocation.latitude,
+        myLocation.longitude,
+        busLocation.latitude,
+        busLocation.longitude
+      )
+      : null;
+
+  // ── Native map error fallback ─────────────────────────────────────────────
+  const renderFallbackCard = () => (
+    <View style={styles.webFallback}>
+      <View style={styles.mapIconCircle}>
+        <Bus size={38} color="#2563EB" strokeWidth={2.2} />
+      </View>
+      <Text style={styles.fallbackTitle}>
+        {vehicleNumber ? `Bus ${vehicleNumber}` : "Assigned Bus"}
+      </Text>
+      <Text style={styles.fallbackSubtitle}>{routeLabel}</Text>
+
+      <View style={styles.statusBadgeRow}>
+        <View
+          style={[
+            styles.statusPill,
+            { backgroundColor: busOnline ? "#DCFCE7" : "#FEF3C7" },
+          ]}
+        >
+          <View
+            style={[
+              styles.onlineDot,
+              { backgroundColor: busOnline ? "#16A34A" : "#D97706" },
+            ]}
+          />
+          <Text
+            style={[
+              styles.statusPillText,
+              { color: busOnline ? "#15803D" : "#B45309" },
+            ]}
+          >
+            {busOnline ? "LIVE ON ROUTE" : "AT DEPOT / OFFLINE"}
+          </Text>
+        </View>
+      </View>
+
+      {hasValidBusCoords ? (
+        <View style={styles.coordCard}>
+          <View style={styles.coordRow}>
+            <MapPin size={18} color="#2563EB" />
+            <Text style={styles.coordLabel}>Last Coordinates:</Text>
+            <Text style={styles.coordValue}>
+              {busLat.toFixed(4)}, {busLng.toFixed(4)}
+            </Text>
+          </View>
+          {distanceKm && (
+            <View style={[styles.coordRow, { marginTop: 8 }]}>
+              <Navigation size={18} color="#10B981" />
+              <Text style={styles.coordLabel}>Est. Distance:</Text>
+              <Text style={[styles.coordValue, { color: "#10B981" }]}>
+                ~{distanceKm} km away
+              </Text>
+            </View>
+          )}
+        </View>
+      ) : (
+        <View style={styles.noticeBox}>
+          <Text style={styles.noticeText}>
+            Driver has not broadcasted GPS coordinates yet today. Location will update automatically as soon as the bus begins transit.
+          </Text>
+        </View>
+      )}
+
       <TouchableOpacity
-        style={styles.retryBtn}
-        onPress={() => { if (retry) retry(); }}
-        activeOpacity={0.8}
+        style={styles.openMapsLargeBtn}
+        onPress={openInGoogleMaps}
+        activeOpacity={0.85}
       >
-        <Text style={styles.retryBtnText}>↻ Try Again</Text>
+        <ExternalLink size={18} color="#FFFFFF" strokeWidth={2.5} style={{ marginRight: 8 }} />
+        <Text style={styles.openMapsLargeBtnText}>Open in Google Maps</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={styles.refreshBtnOutline}
+        onPress={fetchInitialLocation}
+        activeOpacity={0.7}
+      >
+        <RefreshCw size={16} color="#2563EB" style={{ marginRight: 6 }} />
+        <Text style={styles.refreshBtnOutlineText}>Check Live Status</Text>
       </TouchableOpacity>
     </View>
   );
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      onRequestClose={onClose}
+      transparent={false}
+    >
       <SafeAreaView style={styles.root}>
         {/* ── Header ── */}
         <View style={styles.header}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.headerSub}>LIVE BUS TRACKING</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <Bus size={14} color="#93C5FD" strokeWidth={2.5} />
+              <Text style={styles.headerSub}>LIVE BUS TRACKING</Text>
+            </View>
             <Text style={styles.headerTitle} numberOfLines={1}>
-              {vehicleNumber ? `${vehicleNumber} · ${routeLabel}` : "My Bus"}
+              {vehicleNumber ? `Bus ${vehicleNumber} · ${routeLabel}` : "Transit Bus"}
             </Text>
           </View>
+
           <View style={styles.headerRight}>
-            {/* Only show live/offline dot when all conditions pass */}
-            {isAssigned && isDriverActive && isDriverOnDuty && (
-              <>
-                <View style={[styles.onlineDot, { backgroundColor: busOnline ? "#34D399" : "#94A3B8" }]} />
-                <Text style={styles.onlineLabel}>{busOnline ? "LIVE" : "OFFLINE"}</Text>
-              </>
-            )}
-            {/* Open in Maps button only when we have valid GPS */}
-            {hasValidBusCoords && (
-              <TouchableOpacity
-                onPress={openInGoogleMaps}
-                style={[styles.closeBtn, { marginRight: 4, backgroundColor: "rgba(255,255,255,0.2)" }]}
-                accessibilityLabel="Open in Google Maps"
+            {isAssigned && (
+              <View
+                style={[
+                  styles.statusBadge,
+                  { backgroundColor: busOnline ? "rgba(16,185,129,0.2)" : "rgba(245,158,11,0.2)" },
+                ]}
               >
-                <ExternalLink size={15} color="#FFF" strokeWidth={2.2} />
-              </TouchableOpacity>
+                <View
+                  style={[
+                    styles.onlineDot,
+                    { backgroundColor: busOnline ? "#10B981" : "#F59E0B" },
+                  ]}
+                />
+                <Text
+                  style={[
+                    styles.onlineLabel,
+                    { color: busOnline ? "#34D399" : "#FCD34D" },
+                  ]}
+                >
+                  {busOnline ? "LIVE" : "OFFLINE"}
+                </Text>
+              </View>
             )}
-            <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-              <X size={16} color="#FFF" strokeWidth={2.5} />
+
+            <TouchableOpacity
+              onPress={fetchInitialLocation}
+              style={styles.headerIconBtn}
+              accessibilityLabel="Refresh bus location"
+            >
+              <RefreshCw size={16} color="#FFF" strokeWidth={2.2} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={openInGoogleMaps}
+              style={styles.headerIconBtn}
+              accessibilityLabel="Open in Google Maps"
+            >
+              <ExternalLink size={16} color="#FFF" strokeWidth={2.2} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={onClose}
+              style={[styles.headerIconBtn, { backgroundColor: "rgba(255,255,255,0.25)" }]}
+              accessibilityLabel="Close tracking map"
+            >
+              <X size={18} color="#FFF" strokeWidth={2.5} />
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* ── Body: four-condition gated rendering ── */}
+        {/* ── Main Body ── */}
         {loading ? (
           <View style={styles.centreBox}>
             <ActivityIndicator color="#2563EB" size="large" />
-            <Text style={styles.centreText}>Connecting to driver GPS…</Text>
+            <Text style={styles.centreText}>Connecting to bus GPS signal…</Text>
           </View>
-
-        ) : error ? (
-          /* ── Network / server error ── */
-          <View style={styles.centreBox}>
-            <Text style={{ fontSize: 42, marginBottom: 12 }}>🚌</Text>
-            <Text style={styles.errorTitle}>Unable to Load Map</Text>
-            <Text style={styles.errorBody}>{error}</Text>
-            <TouchableOpacity style={styles.retryBtn} onPress={fetchInitialLocation}>
-              <Text style={styles.retryBtnText}>↻  Retry</Text>
-            </TouchableOpacity>
-          </View>
-
         ) : !isAssigned ? (
-          /* ── Condition 1 failed: student has no bus assigned ── */
           <View style={styles.centreBox}>
             <Text style={{ fontSize: 52, marginBottom: 16 }}>🚌</Text>
             <Text style={styles.offlineTitle}>No Bus Assigned</Text>
             <Text style={styles.offlineBody}>
-              You have not been assigned to a bus. Please contact your transport administrator.
+              You currently do not have a bus assigned to your transport profile. Please contact the transport officer to register your route.
             </Text>
-          </View>
-
-        ) : !isDriverActive ? (
-          /* ── Condition 2 failed: driver account is not Active ── */
-          <View style={styles.centreBox}>
-            <Text style={{ fontSize: 52, marginBottom: 16 }}>🚫</Text>
-            <Text style={styles.offlineTitle}>Bus Tracking Unavailable</Text>
-            <Text style={styles.offlineBody}>
-              Bus tracking is currently unavailable.
-            </Text>
-            <TouchableOpacity style={styles.retryBtn} onPress={fetchInitialLocation}>
-              <Text style={styles.retryBtnText}>↻  Check Again</Text>
+            <TouchableOpacity style={styles.actionBtn} onPress={onClose}>
+              <Text style={styles.actionBtnText}>Go Back</Text>
             </TouchableOpacity>
           </View>
-
-        ) : !isDriverOnDuty ? (
-          /* ── Condition 3 failed: driver hasn't started their duty today ── */
-          <View style={styles.centreBox}>
-            <Text style={{ fontSize: 52, marginBottom: 16 }}>⏳</Text>
-            <Text style={styles.offlineTitle}>Bus Tracking Unavailable</Text>
-            <Text style={styles.offlineBody}>
-              Bus tracking is currently unavailable.
-            </Text>
-            <TouchableOpacity style={styles.retryBtn} onPress={fetchInitialLocation}>
-              <Text style={styles.retryBtnText}>↻  Check Again</Text>
-            </TouchableOpacity>
-          </View>
-
-        ) : !hasValidBusCoords ? (
-          /* ── Condition 4 failed: driver is on duty but no valid GPS yet ── */
-          <View style={styles.centreBox}>
-            <Text style={{ fontSize: 52, marginBottom: 16 }}>📡</Text>
-            <Text style={styles.offlineTitle}>Bus Location Unavailable</Text>
-            <Text style={styles.offlineBody}>
-              Bus location is currently unavailable. The driver's GPS is being acquired — please try again shortly.
-            </Text>
-            <TouchableOpacity style={styles.retryBtn} onPress={fetchInitialLocation}>
-              <Text style={styles.retryBtnText}>↻  Refresh</Text>
-            </TouchableOpacity>
-          </View>
-
         ) : Platform.OS === "web" ? (
-          /* ── All conditions met — Web: embedded Google Maps iframe ── */
+          /* Web Browser Embed */
           <View style={{ flex: 1 }}>
             <iframe
-              key={`${busLat}-${busLng}`}
+              key={`${activeRegion.latitude}-${activeRegion.longitude}`}
               title="bus-live-map"
               width="100%"
               height="100%"
               style={{ border: 0, display: "block" }}
               loading="lazy"
-              src={`https://maps.google.com/maps?q=${busLat},${busLng}&z=16&output=embed`}
+              src={`https://maps.google.com/maps?q=${activeRegion.latitude},${activeRegion.longitude}&z=15&output=embed`}
             />
-            {/* Stale GPS overlay */}
-            {!busOnline && (
-              <View
-                style={{
-                  position: "absolute",
-                  top: 12,
-                  left: 12,
-                  right: 12,
-                  backgroundColor: "rgba(254,249,195,0.95)",
-                  borderRadius: 10,
-                  padding: 10,
-                  borderWidth: 1,
-                  borderColor: "#FDE047",
-                }}
-              >
-                <Text style={{ color: "#713F12", fontSize: 12, fontWeight: "700", textAlign: "center" }}>
-                  ⚠️ Driver GPS signal weak — showing last known position
-                </Text>
+            {/* Info overlay */}
+            <View style={styles.bottomInfoCard}>
+              <View style={styles.infoRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.infoLabel}>BUS NUMBER</Text>
+                  <Text style={styles.infoValue}>{vehicleNumber}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.infoLabel}>ROUTE</Text>
+                  <Text style={styles.infoValue}>{routeLabel}</Text>
+                </View>
+                <TouchableOpacity style={styles.mapsCircleBtn} onPress={openInGoogleMaps}>
+                  <ExternalLink size={18} color="#FFF" strokeWidth={2.5} />
+                </TouchableOpacity>
               </View>
-            )}
+            </View>
           </View>
-
-        ) : !MapView || !Marker ? (
-          /* ── Native map library not available ── */
-          renderNativeFallback()
+        ) : !MapView || !Marker || nativeMapFailed ? (
+          /* Fallback view when native maps is unavailable or crashed */
+          renderFallbackCard()
         ) : (
-          /* ── All conditions met — Native Map (iOS / Android) wrapped in ErrorBoundary ── */
-          <MapErrorBoundary fallback={(err, retry) => renderNativeFallback(err, retry)}>
+          /* Native Interactive MapView (iOS & Android) */
+          <MapErrorBoundary
+            fallback={() => {
+              setNativeMapFailed(true);
+              return renderFallbackCard();
+            }}
+          >
             <View style={{ flex: 1 }}>
               <MapView
                 ref={mapRef}
                 style={styles.map}
                 provider={PROVIDER_GOOGLE}
-                initialRegion={initialRegion}
+                initialRegion={activeRegion}
                 showsUserLocation={false}
                 showsMyLocationButton={false}
                 showsCompass
                 showsScale
+                onMapReady={() => {
+                  mapReadyRef.current = true;
+                  if (busLocation) animateToBus(busLocation);
+                }}
               >
-                {/* Bus marker */}
+                {/* Bus Marker */}
                 {hasValidBusCoords && (
                   <Marker
                     coordinate={{
@@ -476,9 +596,8 @@ export default function LiveBusTrackingModal({
                       longitude: busLng,
                     }}
                     title={`Bus ${vehicleNumber}`}
-                    description={`Route: ${routeLabel} · ${busOnline ? "Live" : "Last known"}`}
+                    description={`Route: ${routeLabel} · ${busOnline ? "Live" : "Last Known"}`}
                     anchor={{ x: 0.5, y: 0.5 }}
-                    tracksViewChanges={false}
                   >
                     <View style={styles.busMarker}>
                       <Text style={styles.busMarkerEmoji}>🚌</Text>
@@ -486,63 +605,130 @@ export default function LiveBusTrackingModal({
                   </Marker>
                 )}
 
-                {/* Student's own location dot */}
-                {myLocation && parseCoord(myLocation.latitude) !== null && parseCoord(myLocation.longitude) !== null && (
-                  <Marker
-                    coordinate={{
-                      latitude: parseCoord(myLocation.latitude),
-                      longitude: parseCoord(myLocation.longitude),
-                    }}
-                    title="You"
-                    description="Your current location"
-                    anchor={{ x: 0.5, y: 0.5 }}
-                    tracksViewChanges={false}
-                  >
-                    <View style={styles.myMarker}>
-                      <View style={styles.myMarkerDot} />
-                    </View>
-                  </Marker>
-                )}
+                {/* Student's Own Location Marker */}
+                {myLocation &&
+                  parseCoord(myLocation.latitude) !== null &&
+                  parseCoord(myLocation.longitude) !== null && (
+                    <Marker
+                      coordinate={{
+                        latitude: parseCoord(myLocation.latitude),
+                        longitude: parseCoord(myLocation.longitude),
+                      }}
+                      title="Your Location"
+                      description="You are here"
+                      anchor={{ x: 0.5, y: 0.5 }}
+                    >
+                      <View style={styles.myMarker}>
+                        <View style={styles.myMarkerDot} />
+                      </View>
+                    </Marker>
+                  )}
               </MapView>
 
-              {/* ── Info strip overlaid at bottom ── */}
-              <View style={styles.infoStrip}>
-                {!busOnline && busLocation && (
-                  <View style={styles.offlineBanner}>
-                    <Text style={styles.offlineBannerText}>
-                      ⚠️  Driver GPS offline — showing last known position
-                    </Text>
-                  </View>
+              {/* Top Warning Banner if Bus is Offline */}
+              {!busOnline && (
+                <View style={styles.topOfflineBanner}>
+                  <AlertTriangle size={14} color="#B45309" strokeWidth={2.5} />
+                  <Text style={styles.topOfflineBannerText}>
+                    {hasValidBusCoords
+                      ? "Showing last reported position · Driver offline"
+                      : "Bus at Depot · Awaiting trip start"}
+                  </Text>
+                </View>
+              )}
+
+              {/* Floating Action Controls */}
+              <View style={styles.floatingControls}>
+                {hasValidBusCoords && (
+                  <TouchableOpacity
+                    style={styles.floatingBtn}
+                    onPress={() => animateToBus(busLocation)}
+                    accessibilityLabel="Center on bus"
+                  >
+                    <Bus size={20} color="#2563EB" strokeWidth={2.2} />
+                  </TouchableOpacity>
                 )}
+
+                {myLocation && (
+                  <TouchableOpacity
+                    style={styles.floatingBtn}
+                    onPress={() => {
+                      if (mapRef.current && mapReadyRef.current) {
+                        mapRef.current.animateToRegion({
+                          latitude: myLocation.latitude,
+                          longitude: myLocation.longitude,
+                          latitudeDelta: 0.01,
+                          longitudeDelta: 0.01,
+                        });
+                      }
+                    }}
+                    accessibilityLabel="Center on my location"
+                  >
+                    <Compass size={20} color="#10B981" strokeWidth={2.2} />
+                  </TouchableOpacity>
+                )}
+
+                <TouchableOpacity
+                  style={[styles.floatingBtn, { backgroundColor: "#2563EB" }]}
+                  onPress={openInGoogleMaps}
+                  accessibilityLabel="Open directions in Maps app"
+                >
+                  <ExternalLink size={18} color="#FFFFFF" strokeWidth={2.5} />
+                </TouchableOpacity>
+              </View>
+
+              {/* Bottom Information Card */}
+              <View style={styles.bottomInfoCard}>
                 <View style={styles.infoRow}>
-                  <View style={styles.infoItem}>
+                  <View style={styles.infoCol}>
                     <Text style={styles.infoLabel}>BUS</Text>
-                    <Text style={styles.infoValue}>{vehicleNumber}</Text>
-                  </View>
-                  <View style={styles.infoItem}>
-                    <Text style={styles.infoLabel}>ROUTE</Text>
-                    <Text style={styles.infoValue} numberOfLines={1}>{routeLabel}</Text>
-                  </View>
-                  <View style={styles.infoItem}>
-                    <Text style={styles.infoLabel}>UPDATED</Text>
-                    <Text style={styles.infoValue}>
-                      {busLocation ? formatTime(busLocation.updatedAt) : "—"}
+                    <Text style={styles.infoValue} numberOfLines={1}>
+                      {vehicleNumber}
                     </Text>
                   </View>
-                  <TouchableOpacity
-                    style={styles.centreMapBtn}
-                    onPress={() => busLocation && animateToBus(busLocation)}
-                    accessibilityLabel="Centre map on bus"
-                  >
-                    <Text style={styles.centreMapBtnText}>🎯</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.centreMapBtn, { backgroundColor: "#2563EB", borderColor: "#1D4ED8" }]}
-                    onPress={openInGoogleMaps}
-                    accessibilityLabel="Open in Google Maps"
-                  >
-                    <ExternalLink size={18} color="#FFFFFF" strokeWidth={2.5} />
-                  </TouchableOpacity>
+
+                  <View style={styles.infoCol}>
+                    <Text style={styles.infoLabel}>ROUTE</Text>
+                    <Text style={styles.infoValue} numberOfLines={1}>
+                      {routeLabel}
+                    </Text>
+                  </View>
+
+                  <View style={styles.infoCol}>
+                    <Text style={styles.infoLabel}>STATUS</Text>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                      <View
+                        style={[
+                          styles.smallDot,
+                          { backgroundColor: busOnline ? "#10B981" : "#F59E0B" },
+                        ]}
+                      />
+                      <Text
+                        style={[
+                          styles.infoValue,
+                          { color: busOnline ? "#10B981" : "#D97706", fontSize: 12 },
+                        ]}
+                      >
+                        {busOnline ? "Active" : "Depot"}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {distanceKm ? (
+                    <View style={styles.infoCol}>
+                      <Text style={styles.infoLabel}>DISTANCE</Text>
+                      <Text style={[styles.infoValue, { color: "#2563EB" }]}>
+                        {distanceKm} km
+                      </Text>
+                    </View>
+                  ) : (
+                    <View style={styles.infoCol}>
+                      <Text style={styles.infoLabel}>UPDATED</Text>
+                      <Text style={styles.infoValue}>
+                        {busLocation ? formatTime(busLocation.updatedAt) : "—"}
+                      </Text>
+                    </View>
+                  )}
                 </View>
               </View>
             </View>
@@ -564,54 +750,57 @@ const styles = StyleSheet.create({
   header: {
     backgroundColor: "#1E40AF",
     paddingHorizontal: 16,
-    paddingVertical: 14,
-    paddingTop: Platform.OS === "android" ? 44 : 14,
+    paddingVertical: 12,
+    paddingTop: Platform.OS === "android" ? 40 : 12,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
   headerSub: {
-    color: "rgba(255,255,255,0.6)",
+    color: "rgba(255,255,255,0.75)",
     fontSize: 10,
-    fontWeight: "700",
+    fontWeight: "800",
     letterSpacing: 1.2,
-    marginBottom: 2,
   },
   headerTitle: {
     color: "#FFFFFF",
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: "900",
+    marginTop: 2,
   },
   headerRight: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 8,
+  },
+  statusBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 20,
+    gap: 5,
   },
   onlineDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
   },
   onlineLabel: {
-    color: "#FFFFFF",
-    fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 0.8,
-    marginRight: 4,
-  },
-  closeBtn: {
-    backgroundColor: "rgba(255,255,255,0.15)",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  closeBtnText: {
-    color: "#FFFFFF",
+    fontSize: 10,
     fontWeight: "900",
-    fontSize: 14,
+    letterSpacing: 0.8,
+  },
+  headerIconBtn: {
+    backgroundColor: "rgba(255,255,255,0.15)",
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
   },
 
-  // Centre states (loading / error / offline)
+  // Centre states
   centreBox: {
     flex: 1,
     alignItems: "center",
@@ -630,102 +819,25 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     color: "#1E293B",
     textAlign: "center",
-    marginBottom: 10,
+    marginBottom: 8,
   },
   offlineBody: {
     fontSize: 13,
     color: "#64748B",
     textAlign: "center",
     lineHeight: 20,
-    marginBottom: 6,
-  },
-  errorTitle: {
-    fontSize: 18,
-    fontWeight: "900",
-    color: "#DC2626",
-    marginBottom: 8,
-    textAlign: "center",
-  },
-  errorBody: {
-    fontSize: 13,
-    color: "#64748B",
-    textAlign: "center",
     marginBottom: 20,
   },
-  retryBtn: {
-    marginTop: 20,
+  actionBtn: {
     backgroundColor: "#2563EB",
-    paddingHorizontal: 28,
+    paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 12,
   },
-  retryBtnText: {
+  actionBtnText: {
     color: "#FFFFFF",
     fontWeight: "800",
     fontSize: 14,
-  },
-
-  // Web fallback
-  webFallback: {
-    flex: 1,
-    backgroundColor: "#F8FAFC",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 28,
-  },
-  webTitle: {
-    fontSize: 20,
-    fontWeight: "900",
-    color: "#1E293B",
-    marginBottom: 20,
-  },
-  coordCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    padding: 20,
-    width: "100%",
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    marginBottom: 16,
-  },
-  coordLabel: {
-    fontSize: 9,
-    fontWeight: "700",
-    color: "#94A3B8",
-    letterSpacing: 1,
-    marginTop: 10,
-  },
-  coordValue: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: "#1E293B",
-    marginTop: 2,
-  },
-  mapsBtn: {
-    backgroundColor: "#2563EB",
-    paddingHorizontal: 28,
-    paddingVertical: 14,
-    borderRadius: 14,
-    marginBottom: 16,
-  },
-  mapsBtnText: {
-    color: "#FFFFFF",
-    fontWeight: "800",
-    fontSize: 15,
-  },
-  offlineBadge: {
-    backgroundColor: "#FEF9C3",
-    borderRadius: 10,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: "#FDE047",
-    width: "100%",
-  },
-  offlineBadgeText: {
-    color: "#713F12",
-    fontSize: 12,
-    fontWeight: "700",
-    textAlign: "center",
   },
 
   // Native map
@@ -733,28 +845,26 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  // Bus marker (custom view)
+  // Markers
   busMarker: {
     backgroundColor: "#1E40AF",
-    borderRadius: 24,
+    borderRadius: 22,
     padding: 6,
-    borderWidth: 3,
+    borderWidth: 2.5,
     borderColor: "#FFFFFF",
+    elevation: 8,
     shadowColor: "#000",
-    shadowOpacity: 0.35,
-    shadowRadius: 6,
-    elevation: 6,
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
   },
   busMarkerEmoji: {
-    fontSize: 22,
+    fontSize: 20,
   },
-
-  // My location marker
   myMarker: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: "rgba(37,99,235,0.18)",
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "rgba(37,99,235,0.25)",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 2,
@@ -767,48 +877,82 @@ const styles = StyleSheet.create({
     backgroundColor: "#2563EB",
   },
 
-  // Info strip
-  infoStrip: {
+  // Top banner
+  topOfflineBanner: {
+    position: "absolute",
+    top: 12,
+    left: 12,
+    right: 12,
+    backgroundColor: "rgba(254,243,199,0.95)",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderColor: "#FCD34D",
+    elevation: 4,
+  },
+  topOfflineBannerText: {
+    color: "#92400E",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+
+  // Floating controls
+  floatingControls: {
+    position: "absolute",
+    right: 16,
+    bottom: 110,
+    gap: 10,
+  },
+  floatingBtn: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 6,
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+
+  // Bottom info card
+  bottomInfoCard: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
     backgroundColor: "#FFFFFF",
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    paddingBottom: 16,
-    paddingTop: 6,
-    shadowColor: "#000",
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    elevation: 10,
-  },
-  offlineBanner: {
-    backgroundColor: "#FEF9C3",
     paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    marginHorizontal: 12,
-    marginTop: 10,
-    marginBottom: 4,
-    borderWidth: 1,
-    borderColor: "#FDE047",
-  },
-  offlineBannerText: {
-    color: "#713F12",
-    fontSize: 11,
-    fontWeight: "700",
-    textAlign: "center",
+    paddingVertical: 14,
+    paddingBottom: Platform.OS === "ios" ? 28 : 16,
+    elevation: 12,
+    shadowColor: "#000",
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    borderTopWidth: 1,
+    borderTopColor: "#E2E8F0",
   },
   infoRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    gap: 8,
+    justifyContent: "space-between",
   },
-  infoItem: {
+  infoCol: {
     flex: 1,
   },
   infoLabel: {
     fontSize: 9,
-    fontWeight: "700",
+    fontWeight: "800",
     color: "#94A3B8",
     letterSpacing: 0.8,
     marginBottom: 2,
@@ -818,17 +962,136 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#1E293B",
   },
-  centreMapBtn: {
-    backgroundColor: "#EFF6FF",
-    borderRadius: 12,
-    width: 44,
-    height: 44,
+  smallDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  mapsCircleBtn: {
+    backgroundColor: "#2563EB",
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
+  },
+
+  // Fallback View
+  webFallback: {
+    flex: 1,
+    backgroundColor: "#F8FAFC",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+  },
+  mapIconCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: "#EFF6FF",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "#DBEAFE",
+  },
+  fallbackTitle: {
+    fontSize: 22,
+    fontWeight: "900",
+    color: "#1E293B",
+    marginBottom: 4,
+  },
+  fallbackSubtitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#64748B",
+    marginBottom: 14,
+  },
+  statusBadgeRow: {
+    marginBottom: 20,
+  },
+  statusPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    gap: 6,
+  },
+  statusPillText: {
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+  },
+  coordCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    padding: 16,
+    width: "100%",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    marginBottom: 20,
+  },
+  coordRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  coordLabel: {
+    fontSize: 12,
+    color: "#64748B",
+    fontWeight: "600",
+  },
+  coordValue: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#1E293B",
+  },
+  noticeBox: {
+    backgroundColor: "#EFF6FF",
+    borderRadius: 12,
+    padding: 14,
     borderWidth: 1,
     borderColor: "#BFDBFE",
+    width: "100%",
+    marginBottom: 20,
   },
-  centreMapBtnText: {
-    fontSize: 20,
+  noticeText: {
+    color: "#1E40AF",
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: "center",
+  },
+  openMapsLargeBtn: {
+    backgroundColor: "#2563EB",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "100%",
+    paddingVertical: 14,
+    borderRadius: 14,
+    marginBottom: 10,
+    elevation: 2,
+  },
+  openMapsLargeBtnText: {
+    color: "#FFFFFF",
+    fontWeight: "800",
+    fontSize: 15,
+  },
+  refreshBtnOutline: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "100%",
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    backgroundColor: "#FFFFFF",
+  },
+  refreshBtnOutlineText: {
+    color: "#2563EB",
+    fontWeight: "700",
+    fontSize: 13,
   },
 });

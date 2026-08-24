@@ -852,45 +852,88 @@ source: StudentApp-handleScanQR`);
       socketRef.current.on("new_notification", (notif) => {
         const alert = mapNotificationToAlert(notif);
         setRouteAlerts((prev) => {
+          let parsedData = {};
+          try {
+            parsedData = typeof notif.data === "string" ? JSON.parse(notif.data || "{}") : (notif.data || {});
+          } catch {}
+          const notifStudentId = parsedData.studentId;
+
+          // If this is a missing alert, deduplicate by studentId or alert id
+          if (alert.notificationType === "missing_alert" || notif.type === "missing_alert") {
+            const index = prev.findIndex(
+              (p) =>
+                p.id === alert.id ||
+                p.id === parsedData.alertId ||
+                (notifStudentId && p.studentId === notifStudentId)
+            );
+            if (index !== -1) {
+              const updated = [...prev];
+              updated[index] = { ...updated[index], ...alert, studentId: notifStudentId || updated[index].studentId };
+              return updated;
+            }
+          }
+
           if (prev.some((a) => a.id === alert.id)) return prev;
+          setUnreadAlerts((prevCount) => prevCount + 1);
           return [alert, ...prev];
         });
-        setUnreadAlerts((prev) => prev + 1);
       });
 
-      // ── Real-Time Student Missing Alert for Parent ──
+      // ── Real-Time Student Missing Alert for Parent / HOD ──
       socketRef.current.on("driver_student_missing_alert", (alert) => {
-        if (userRole === "parent") {
+        if (userRole === "parent" || userRole === "hod") {
           const studentName = alert.studentName || "Your Child";
           const dist = alert.distanceMeters ?? "10+";
           const alertMsg = `Alert: Student ${studentName} is more than 10 meters (${dist} m) away from assigned vehicle ${alert.vehicleNumber || ""}. Please check student status.`;
 
-          Alert.alert("🚨 Student Missing Alert", alertMsg, [{ text: "OK" }]);
+          setRouteAlerts((prev) => {
+            const existingIndex = prev.findIndex(
+              (p) =>
+                p.id === alert.id ||
+                (p.studentId && alert.studentId && p.studentId === alert.studentId) ||
+                (p.notificationType === "missing_alert" && p.studentName === studentName && p.status !== "RESOLVED")
+            );
 
-          setRouteAlerts((prev) => [
-            {
+            const updatedCard = {
               id: alert.id || Date.now().toString(),
               title: "🚨 Student Missing Alert",
               message: alertMsg,
               notificationType: "missing_alert",
+              studentId: alert.studentId,
               studentName,
               distanceMeters: dist,
               effectiveDate: new Date().toISOString().split("T")[0],
               effectiveTime: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
               receivedAt: new Date().toISOString(),
-            },
-            ...prev.filter((p) => p.id !== alert.id),
-          ]);
-          setUnreadAlerts((c) => c + 1);
+              status: "ACTIVE",
+            };
+
+            if (existingIndex !== -1) {
+              // Update existing alert card in place (e.g. 14m -> 18m -> 20m)
+              const updated = [...prev];
+              updated[existingIndex] = { ...updated[existingIndex], ...updatedCard };
+              return updated;
+            }
+
+            Alert.alert("🚨 Student Missing Alert", alertMsg, [{ text: "OK" }]);
+            setUnreadAlerts((c) => c + 1);
+            return [updatedCard, ...prev];
+          });
         }
       });
 
       socketRef.current.on("student_missing_alert_resolved", (res) => {
-        if (userRole === "parent") {
+        if (userRole === "parent" || userRole === "hod") {
           setRouteAlerts((prev) =>
             prev.map((a) =>
-              a.id === res.id || a.studentId === res.studentId
-                ? { ...a, message: `✅ ${a.studentName || "Student"} — Resolved (${res.resolvedReason || "Closed"}).` }
+              a.id === res.id || (a.studentId && res.studentId && a.studentId === res.studentId)
+                ? {
+                    ...a,
+                    status: "RESOLVED",
+                    message: `✅ ${a.studentName || "Student"} — Resolved (${res.resolvedReason || "Closed"}).`,
+                    resolvedReason: res.resolvedReason,
+                    resolvedAt: res.resolvedAt,
+                  }
                 : a
             )
           );
@@ -924,8 +967,8 @@ source: StudentApp-handleScanQR`);
         boardStatus === STAGE.AT_COLLEGE
           ? "Arrived at College"
           : boardStatus === STAGE.AT_HOME
-          ? "Arrived at Home"
-          : "Attendance Closed";
+            ? "Arrived at Home"
+            : "Attendance Closed";
 
       stopStudentTracking({
         studentId: userId,
@@ -1106,7 +1149,7 @@ source: StudentApp-handleScanQR`);
                     style={{ fontSize: 10, fontWeight: "900", color: "#FFFFFF" }}
                   >
                     {/* {boardStatus === "IN_ATTENDANCE" ? "IN TRANSIT" : "IDLE"} */}
-                    {inTransit ? "IN TRANSIT" : "IDLE"}
+                    {inTransit ? "IN TRANSIT" : "STOP"}
                   </Text>
                 </View>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 8 }}>
@@ -1692,7 +1735,7 @@ source: StudentApp-handleScanQR`);
                       borderRadius: 20, zIndex: 2, alignSelf: "flex-start",
                     }}>
                       <Text style={{ fontSize: 10, fontWeight: "900", color: "#FFFFFF", letterSpacing: 0.5 }}>
-                        {childInTransit ? "ON ROUTE" : "IDLE"}
+                        {childInTransit ? "ON ROUTE" : "STOP"}
                       </Text>
                     </View>
                   </View>
@@ -3264,7 +3307,17 @@ source: StudentApp-handleScanQR`);
         <LiveBusTrackingModal
           visible={showLiveMapModal}
           onClose={() => setShowLiveMapModal(false)}
-          user={user}
+          user={
+            userRole === "parent" && childProfile
+              ? {
+                  ...user,
+                  vehicle: childProfile.vehicle || user?.vehicle,
+                  vehicleId: childProfile.vehicleId || childProfile.vehicle || user?.vehicleId,
+                  route: childProfile.route || user?.route,
+                  driverName: childProfile.driverName || user?.driverName,
+                }
+              : user
+          }
           token={token}
           socketRef={socketRef}
           userRole={userRole}

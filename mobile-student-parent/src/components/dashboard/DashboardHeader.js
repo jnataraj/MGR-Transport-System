@@ -45,7 +45,7 @@ export default function DashboardHeader({ user, role, boardStatus }) {
               ]}
             >
               <Text style={styles.statusText}>
-                {inTransit ? "IN TRANSIT" : "IDLE"}
+                {inTransit ? "IN TRANSIT" : "STOP"}
               </Text>
             </View>
             <View style={styles.routePin}>

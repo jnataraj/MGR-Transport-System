@@ -141,10 +141,11 @@ io.on("connection", (socket) => {
     });
 
     // Compare with all active in-transit students on this vehicle
-    if (vehicleId && latitude != null && longitude != null) {
+    if ((vehicleId || driverId) && latitude != null && longitude != null) {
       try {
         await updateDriverLocation({
           vehicleId,
+          vehicleNumber: data.vehicleNumber,
           driverId,
           driverName: data.driverName || data.name,
           latitude,

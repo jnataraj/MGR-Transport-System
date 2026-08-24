@@ -289,6 +289,7 @@ const resolveMissingAlertRecipients = async (studentTransit) => {
 
 /**
  * Dispatch notification ONLY to Web Admin, Same Vehicle Driver & Coordinator, Student's Parent, and Department HOD
+ * Ensures strictly 1 Notification record in DB per (recipient, active missing student)
  */
 const dispatchMissingAlertNotifications = async (io, alertPayload, studentTransit, distanceMeters) => {
   const {
@@ -322,7 +323,7 @@ const dispatchMissingAlertNotifications = async (io, alertPayload, studentTransi
     notificationType: "missing_alert",
   };
 
-  // 1. Deliver to Web Admin (Dashboard Alerts Raised & Admin Notification)
+  // 1. Deliver to Web Admin via Real-Time Socket
   if (io) {
     if (typeof io.emit === "function") {
       io.emit("student_missing_alert", alertPayload);
@@ -330,83 +331,149 @@ const dispatchMissingAlertNotifications = async (io, alertPayload, studentTransi
     }
   }
 
+  // 1. Web Admin DB Notification (Strictly 1 record per active missing student)
   try {
-    const adminNotif = await prisma.notification.create({
-      data: {
-        title,
-        message: driverMessage,
+    const existingAdminNotif = await prisma.notification.findFirst({
+      where: {
         type: "missing_alert",
-        sender: "System",
         target: "admin",
-        data: JSON.stringify(commonData),
+        data: { contains: `"studentId":"${studentTransit.studentId}"` },
       },
+      orderBy: { createdAt: "desc" },
     });
 
-    if (io && typeof io.to === "function") {
-      io.to("admin").emit("new_notification", adminNotif);
-      io.to("superadmin").emit("new_notification", adminNotif);
-      io.to("deptadmin").emit("new_notification", adminNotif);
-    }
-
-    const adminTokens = webAdminUsers.map((a) => a.pushToken).filter(Boolean);
-    if (adminTokens.length > 0) {
-      await sendPushNotification(adminTokens, title, driverMessage, commonData);
-    }
-  } catch (err) {
-    console.error("[missingAlertService] Admin notification error:", err.message);
-  }
-
-  // 2. Deliver ONLY to Assigned Driver of the SAME vehicle
-  if (assignedDriver && assignedDriver.id) {
-    try {
-      const driverNotif = await prisma.notification.create({
+    if (existingAdminNotif) {
+      // Update existing notification with latest distance
+      await prisma.notification.update({
+        where: { id: existingAdminNotif.id },
+        data: {
+          message: driverMessage,
+          data: JSON.stringify(commonData),
+        },
+      });
+    } else {
+      // Create ONE new notification
+      const adminNotif = await prisma.notification.create({
         data: {
           title,
           message: driverMessage,
           type: "missing_alert",
           sender: "System",
-          target: "driver",
-          userId: assignedDriver.id,
+          target: "admin",
           data: JSON.stringify(commonData),
         },
       });
 
-      if (io && typeof io.to === "function") {
-        io.to(`user_${assignedDriver.id}`).emit("driver_student_missing_alert", alertPayload);
-        io.to(`user_${assignedDriver.id}`).emit("new_notification", driverNotif);
+      const adminTokens = webAdminUsers.map((a) => a.pushToken).filter(Boolean);
+      if (adminTokens.length > 0) {
+        await sendPushNotification(adminTokens, title, driverMessage, commonData);
       }
 
-      if (assignedDriver.pushToken) {
-        await sendPushNotification([assignedDriver.pushToken], title, driverMessage, commonData);
+      if (io && typeof io.to === "function") {
+        io.to("admin").emit("new_notification", adminNotif);
+        io.to("superadmin").emit("new_notification", adminNotif);
+        io.to("deptadmin").emit("new_notification", adminNotif);
+      }
+    }
+  } catch (err) {
+    console.error("[missingAlertService] Admin notification error:", err.message);
+  }
+
+  // 2. Deliver ONLY to Assigned Driver of the SAME vehicle (Strictly 1 record per active missing student)
+  if (assignedDriver && assignedDriver.id) {
+    try {
+      if (io && typeof io.to === "function") {
+        io.to(`user_${assignedDriver.id}`).emit("driver_student_missing_alert", alertPayload);
+      }
+
+      const existingDriverNotif = await prisma.notification.findFirst({
+        where: {
+          type: "missing_alert",
+          userId: assignedDriver.id,
+          data: { contains: `"studentId":"${studentTransit.studentId}"` },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+
+      if (existingDriverNotif) {
+        await prisma.notification.update({
+          where: { id: existingDriverNotif.id },
+          data: {
+            message: driverMessage,
+            data: JSON.stringify(commonData),
+          },
+        });
+      } else {
+        const driverNotif = await prisma.notification.create({
+          data: {
+            title,
+            message: driverMessage,
+            type: "missing_alert",
+            sender: "System",
+            target: "driver",
+            userId: assignedDriver.id,
+            data: JSON.stringify(commonData),
+          },
+        });
+
+        if (io && typeof io.to === "function") {
+          io.to(`user_${assignedDriver.id}`).emit("new_notification", driverNotif);
+        }
+
+        if (assignedDriver.pushToken) {
+          await sendPushNotification([assignedDriver.pushToken], title, driverMessage, commonData);
+        }
       }
     } catch (err) {
       console.error("[missingAlertService] Driver notification error:", err.message);
     }
   }
 
-  // 3. Deliver ONLY to Assigned Coordinator(s) of the SAME vehicle
+  // 3. Deliver ONLY to Assigned Coordinator(s) of the SAME vehicle (Strictly 1 record per active missing student)
   for (const coordinator of assignedCoordinators) {
     if (coordinator && coordinator.id) {
       try {
-        const coordNotif = await prisma.notification.create({
-          data: {
-            title,
-            message: driverMessage,
-            type: "missing_alert",
-            sender: "System",
-            target: "coordinator",
-            userId: coordinator.id,
-            data: JSON.stringify(commonData),
-          },
-        });
-
         if (io && typeof io.to === "function") {
           io.to(`user_${coordinator.id}`).emit("driver_student_missing_alert", alertPayload);
-          io.to(`user_${coordinator.id}`).emit("new_notification", coordNotif);
         }
 
-        if (coordinator.pushToken) {
-          await sendPushNotification([coordinator.pushToken], title, driverMessage, commonData);
+        const existingCoordNotif = await prisma.notification.findFirst({
+          where: {
+            type: "missing_alert",
+            userId: coordinator.id,
+            data: { contains: `"studentId":"${studentTransit.studentId}"` },
+          },
+          orderBy: { createdAt: "desc" },
+        });
+
+        if (existingCoordNotif) {
+          await prisma.notification.update({
+            where: { id: existingCoordNotif.id },
+            data: {
+              message: driverMessage,
+              data: JSON.stringify(commonData),
+            },
+          });
+        } else {
+          const coordNotif = await prisma.notification.create({
+            data: {
+              title,
+              message: driverMessage,
+              type: "missing_alert",
+              sender: "System",
+              target: "coordinator",
+              userId: coordinator.id,
+              data: JSON.stringify(commonData),
+            },
+          });
+
+          if (io && typeof io.to === "function") {
+            io.to(`user_${coordinator.id}`).emit("new_notification", coordNotif);
+          }
+
+          if (coordinator.pushToken) {
+            await sendPushNotification([coordinator.pushToken], title, driverMessage, commonData);
+          }
         }
       } catch (err) {
         console.error("[missingAlertService] Coordinator notification error:", err.message);
@@ -414,29 +481,51 @@ const dispatchMissingAlertNotifications = async (io, alertPayload, studentTransi
     }
   }
 
-  // 4. Deliver ONLY to Parent(s) assigned to this specific student
+  // 4. Deliver ONLY to Parent(s) assigned to this specific student (Strictly 1 record per active missing student)
   for (const parent of assignedParents) {
     if (parent && parent.id) {
       try {
-        const parentNotif = await prisma.notification.create({
-          data: {
-            title,
-            message: parentMessage,
-            type: "missing_alert",
-            sender: "System",
-            target: "parent",
-            userId: parent.id,
-            data: JSON.stringify(commonData),
-          },
-        });
-
         if (io && typeof io.to === "function") {
           io.to(`user_${parent.id}`).emit("driver_student_missing_alert", alertPayload);
-          io.to(`user_${parent.id}`).emit("new_notification", parentNotif);
         }
 
-        if (parent.pushToken) {
-          await sendPushNotification([parent.pushToken], title, parentMessage, commonData);
+        const existingParentNotif = await prisma.notification.findFirst({
+          where: {
+            type: "missing_alert",
+            userId: parent.id,
+            data: { contains: `"studentId":"${studentTransit.studentId}"` },
+          },
+          orderBy: { createdAt: "desc" },
+        });
+
+        if (existingParentNotif) {
+          await prisma.notification.update({
+            where: { id: existingParentNotif.id },
+            data: {
+              message: parentMessage,
+              data: JSON.stringify(commonData),
+            },
+          });
+        } else {
+          const parentNotif = await prisma.notification.create({
+            data: {
+              title,
+              message: parentMessage,
+              type: "missing_alert",
+              sender: "System",
+              target: "parent",
+              userId: parent.id,
+              data: JSON.stringify(commonData),
+            },
+          });
+
+          if (io && typeof io.to === "function") {
+            io.to(`user_${parent.id}`).emit("new_notification", parentNotif);
+          }
+
+          if (parent.pushToken) {
+            await sendPushNotification([parent.pushToken], title, parentMessage, commonData);
+          }
         }
       } catch (err) {
         console.error("[missingAlertService] Parent notification error:", err.message);
@@ -444,29 +533,51 @@ const dispatchMissingAlertNotifications = async (io, alertPayload, studentTransi
     }
   }
 
-  // 5. Deliver ONLY to HOD of that student's department
+  // 5. Deliver ONLY to HOD of that student's department (Strictly 1 record per active missing student)
   for (const hod of assignedHods) {
     if (hod && hod.id) {
       try {
-        const hodNotif = await prisma.notification.create({
-          data: {
-            title: `🚨 Student Missing Alert - ${studentDepartment || "Department"}`,
-            message: hodMessage,
-            type: "missing_alert",
-            sender: "System",
-            target: "hod",
-            userId: hod.id,
-            data: JSON.stringify(commonData),
-          },
-        });
-
         if (io && typeof io.to === "function") {
           io.to(`user_${hod.id}`).emit("driver_student_missing_alert", alertPayload);
-          io.to(`user_${hod.id}`).emit("new_notification", hodNotif);
         }
 
-        if (hod.pushToken) {
-          await sendPushNotification([hod.pushToken], `🚨 Student Missing Alert - ${studentDepartment || "Department"}`, hodMessage, commonData);
+        const existingHodNotif = await prisma.notification.findFirst({
+          where: {
+            type: "missing_alert",
+            userId: hod.id,
+            data: { contains: `"studentId":"${studentTransit.studentId}"` },
+          },
+          orderBy: { createdAt: "desc" },
+        });
+
+        if (existingHodNotif) {
+          await prisma.notification.update({
+            where: { id: existingHodNotif.id },
+            data: {
+              message: hodMessage,
+              data: JSON.stringify(commonData),
+            },
+          });
+        } else {
+          const hodNotif = await prisma.notification.create({
+            data: {
+              title: `🚨 Student Missing Alert - ${studentDepartment || "Department"}`,
+              message: hodMessage,
+              type: "missing_alert",
+              sender: "System",
+              target: "hod",
+              userId: hod.id,
+              data: JSON.stringify(commonData),
+            },
+          });
+
+          if (io && typeof io.to === "function") {
+            io.to(`user_${hod.id}`).emit("new_notification", hodNotif);
+          }
+
+          if (hod.pushToken) {
+            await sendPushNotification([hod.pushToken], `🚨 Student Missing Alert - ${studentDepartment || "Department"}`, hodMessage, commonData);
+          }
         }
       } catch (err) {
         console.error("[missingAlertService] HOD notification error:", err.message);
@@ -478,7 +589,7 @@ const dispatchMissingAlertNotifications = async (io, alertPayload, studentTransi
 
 
 /**
- * Register or update a student's active in-transit state upon boarding QR scan
+ * Register or update a student's active in-transit state
  */
 const startStudentTransit = async ({
   studentId,
@@ -504,11 +615,26 @@ const startStudentTransit = async ({
   let sRoll = studentRollNo;
 
   try {
-    if (!vNum || !dId || !dName) {
-      const vehicleRecord = await prisma.vehicle.findFirst({
-        where: { OR: [{ id: vehicleId || "" }, { number: vehicleId || vehicleNumber || "" }] },
-        include: { driver: true },
-      });
+    if (!vNum || !dId || !dName || !vId || vId === "N/A") {
+      let vehicleRecord = null;
+      if (vehicleId || vehicleNumber) {
+        vehicleRecord = await prisma.vehicle.findFirst({
+          where: { OR: [{ id: vehicleId || "" }, { number: vehicleId || vehicleNumber || "" }] },
+          include: { driver: true },
+        });
+      }
+
+      // Fallback: check VehicleStudentAssignment in DB
+      if (!vehicleRecord) {
+        const assignment = await prisma.vehicleStudentAssignment.findFirst({
+          where: { studentId },
+          include: { vehicle: { include: { driver: true } } },
+        });
+        if (assignment?.vehicle) {
+          vehicleRecord = assignment.vehicle;
+        }
+      }
+
       if (vehicleRecord) {
         vId = vehicleRecord.id;
         vNum = vehicleRecord.number;
@@ -533,6 +659,13 @@ const startStudentTransit = async ({
     console.error("[missingAlertService] Info resolution error:", err.message);
   }
 
+  const validLat = latitude != null && !isNaN(parseFloat(latitude)) && Math.abs(parseFloat(latitude)) > 0.001
+    ? parseFloat(latitude)
+    : null;
+  const validLng = longitude != null && !isNaN(parseFloat(longitude)) && Math.abs(parseFloat(longitude)) > 0.001
+    ? parseFloat(longitude)
+    : null;
+
   const transitEntry = {
     studentId,
     studentName: sName || "Student",
@@ -542,8 +675,8 @@ const startStudentTransit = async ({
     driverId: dId || null,
     driverName: dName || "Assigned Driver",
     stage,
-    studentLat: latitude != null ? parseFloat(latitude) : null,
-    studentLng: longitude != null ? parseFloat(longitude) : null,
+    studentLat: validLat,
+    studentLng: validLng,
     lastStudentUpdate: new Date(),
     activeAlertId: null,
   };
@@ -551,7 +684,7 @@ const startStudentTransit = async ({
   inTransitStudents.set(studentId, transitEntry);
   console.log(`[missingAlertService] 🟢 Student ${sName} (${studentId}) is now IN-TRANSIT on ${transitEntry.vehicleNumber} (Stage: ${stage})`);
 
-  if (latitude != null && longitude != null) {
+  if (validLat != null && validLng != null) {
     await evaluateProximity(studentId, io);
   }
 };
@@ -563,18 +696,49 @@ const evaluateProximity = async (studentId, io) => {
   const studentTransit = inTransitStudents.get(studentId);
   if (!studentTransit) return null;
 
-  // Student must have GPS fix
-  if (studentTransit.studentLat == null || studentTransit.studentLng == null) {
+  // Student must have a valid non-zero GPS fix
+  if (
+    studentTransit.studentLat == null ||
+    studentTransit.studentLng == null ||
+    isNaN(studentTransit.studentLat) ||
+    isNaN(studentTransit.studentLng) ||
+    Math.abs(studentTransit.studentLat) < 0.001 ||
+    Math.abs(studentTransit.studentLng) < 0.001
+  ) {
     return null;
   }
 
-  // Get driver location from in-memory vehicle location store or DB
+  // Get driver location from in-memory vehicle location store
   const vehicleKey = studentTransit.vehicleId;
   const vehicleNum = studentTransit.vehicleNumber;
-  let vehicleLoc = getVehicleLocation(vehicleKey) || (vehicleNum ? getVehicleLocation(vehicleNum) : null);
+  let vehicleLoc =
+    (vehicleKey && vehicleKey !== "N/A" ? getVehicleLocation(vehicleKey) : null) ||
+    (vehicleNum && vehicleNum !== "N/A" ? getVehicleLocation(vehicleNum) : null);
 
   if (!vehicleLoc && studentTransit.driverId) {
     vehicleLoc = getVehicleLocation(studentTransit.driverId);
+  }
+
+  // Fallback: if vehicle location not found by stored keys, try to find assigned vehicle in DB
+  if (!vehicleLoc && studentTransit.studentId) {
+    try {
+      const assignment = await prisma.vehicleStudentAssignment.findFirst({
+        where: { studentId: studentTransit.studentId },
+        include: { vehicle: true },
+      });
+      if (assignment?.vehicle) {
+        studentTransit.vehicleId = assignment.vehicle.id;
+        studentTransit.vehicleNumber = assignment.vehicle.number;
+        if (assignment.vehicle.driverId) studentTransit.driverId = assignment.vehicle.driverId;
+
+        vehicleLoc =
+          getVehicleLocation(assignment.vehicle.id) ||
+          getVehicleLocation(assignment.vehicle.number) ||
+          (assignment.vehicle.driverId ? getVehicleLocation(assignment.vehicle.driverId) : null);
+      }
+    } catch (e) {
+      console.warn("[missingAlertService] Proximity vehicle lookup fallback error:", e.message);
+    }
   }
 
   if (!vehicleLoc) {
@@ -587,7 +751,23 @@ const evaluateProximity = async (studentId, io) => {
   const studentLat = parseFloat(studentTransit.studentLat);
   const studentLng = parseFloat(studentTransit.studentLng);
 
+  // Validate coordinates are real numbers and not uninitialized (0, 0)
+  if (
+    isNaN(driverLat) ||
+    isNaN(driverLng) ||
+    Math.abs(driverLat) < 0.001 ||
+    Math.abs(driverLng) < 0.001 ||
+    isNaN(studentLat) ||
+    isNaN(studentLng) ||
+    Math.abs(studentLat) < 0.001 ||
+    Math.abs(studentLng) < 0.001
+  ) {
+    return null;
+  }
+
   const distanceMeters = calculateDistanceMeters(studentLat, studentLng, driverLat, driverLng);
+  if (isNaN(distanceMeters)) return null;
+
   console.log(`[missingAlertService] Distance check for ${studentTransit.studentName}: ${distanceMeters.toFixed(2)}m (Threshold: ${MISSING_DISTANCE_THRESHOLD_METERS}m)`);
 
   if (distanceMeters > MISSING_DISTANCE_THRESHOLD_METERS) {
@@ -645,7 +825,7 @@ const evaluateProximity = async (studentId, io) => {
             resolvedAt: new Date(),
             resolvedReason: "Duplicate active alert cleanup",
           },
-        }).catch(() => {});
+        }).catch(() => { });
       } else {
         // CREATE one new active alert
         alertRecord = await prisma.studentMissingAlert.create({
@@ -703,10 +883,8 @@ const evaluateProximity = async (studentId, io) => {
     await dispatchMissingAlertNotifications(io, alertPayload, studentTransit, distanceMeters);
 
     return alertPayload;
-
-
   } else {
-    // Distance <= 10 meters -> If active alert(s) existed, resolve all of them
+    // Distance <= 10 meters (including < 5m) -> If active alert(s) existed, auto-resolve them
     try {
       const activeAlerts = await prisma.studentMissingAlert.findMany({
         where: {
@@ -715,16 +893,14 @@ const evaluateProximity = async (studentId, io) => {
         },
       });
 
-      let closedAlert = null;
       for (const a of activeAlerts) {
-        closedAlert = await closeAlertById(
+        await closeAlertById(
           a.id,
           "Rejoined Vehicle (<10m)",
           io
         );
       }
       studentTransit.activeAlertId = null;
-      if (closedAlert) return closedAlert;
     } catch (resolveErr) {
       console.error("[missingAlertService] Auto-resolve error:", resolveErr.message);
     }
@@ -748,11 +924,21 @@ const updateStudentLocation = async ({
 }) => {
   if (!studentId || latitude == null || longitude == null) return null;
 
+  const validLat = parseFloat(latitude);
+  const validLng = parseFloat(longitude);
+  if (isNaN(validLat) || isNaN(validLng) || Math.abs(validLat) < 0.001 || Math.abs(validLng) < 0.001) {
+    return null;
+  }
+
   let transit = inTransitStudents.get(studentId);
   if (!transit) {
     // Check if student has an active transit stage in DB for today
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
+
+    let stageToUse = "TO_COLLEGE";
+    let resolvedVehicleId = vehicleId;
+    let resolvedVehicleNumber = vehicleNumber;
 
     const latestAttendance = await prisma.attendance.findFirst({
       where: {
@@ -763,37 +949,46 @@ const updateStudentLocation = async ({
       orderBy: { scannedAt: "desc" },
     });
 
-    const isTransitStage =
-      latestAttendance &&
-      (latestAttendance.stage === "TO_COLLEGE" ||
-        latestAttendance.stage === "TO_HOME" ||
-        latestAttendance.stage === "MORNING_INROUTE" ||
-        latestAttendance.stage === "EVENING_INROUTE");
-
-    if (isTransitStage) {
-      await startStudentTransit({
-        studentId,
-        studentName,
-        studentRollNo,
-        vehicleId: vehicleId || latestAttendance.vehicleId,
-        vehicleNumber,
-        stage: latestAttendance.stage,
-        latitude,
-        longitude,
-        io,
-      });
-      transit = inTransitStudents.get(studentId);
+    if (latestAttendance) {
+      stageToUse = latestAttendance.stage || "TO_COLLEGE";
+      if (!resolvedVehicleId) resolvedVehicleId = latestAttendance.vehicleId;
     }
+
+    // Fallback: check VehicleStudentAssignment in DB for assigned vehicle
+    if (!resolvedVehicleId) {
+      const assignment = await prisma.vehicleStudentAssignment.findFirst({
+        where: { studentId },
+        include: { vehicle: { include: { driver: true } } },
+      });
+      if (assignment?.vehicle) {
+        resolvedVehicleId = assignment.vehicle.id;
+        resolvedVehicleNumber = assignment.vehicle.number;
+      }
+    }
+
+    // Register student transit
+    await startStudentTransit({
+      studentId,
+      studentName,
+      studentRollNo,
+      vehicleId: resolvedVehicleId,
+      vehicleNumber: resolvedVehicleNumber,
+      stage: stageToUse,
+      latitude: validLat,
+      longitude: validLng,
+      io,
+    });
+    transit = inTransitStudents.get(studentId);
   }
 
   if (transit) {
-    transit.studentLat = parseFloat(latitude);
-    transit.studentLng = parseFloat(longitude);
+    transit.studentLat = validLat;
+    transit.studentLng = validLng;
     transit.lastStudentUpdate = new Date();
     if (studentName) transit.studentName = studentName;
     if (studentRollNo) transit.studentRollNo = studentRollNo;
-    if (vehicleId) transit.vehicleId = vehicleId;
-    if (vehicleNumber) transit.vehicleNumber = vehicleNumber;
+    if (vehicleId && (!transit.vehicleId || transit.vehicleId === "N/A")) transit.vehicleId = vehicleId;
+    if (vehicleNumber && (!transit.vehicleNumber || transit.vehicleNumber === "N/A")) transit.vehicleNumber = vehicleNumber;
 
     return await evaluateProximity(studentId, io);
   }
@@ -806,25 +1001,34 @@ const updateStudentLocation = async ({
  */
 const updateDriverLocation = async ({
   vehicleId,
+  vehicleNumber,
   driverId,
   driverName,
   latitude,
   longitude,
   io,
 }) => {
-  if (!vehicleId || latitude == null || longitude == null) return;
+  if ((!vehicleId && !driverId) || latitude == null || longitude == null) return;
 
   const lat = parseFloat(latitude);
   const lng = parseFloat(longitude);
-  setVehicleLocation(vehicleId, lat, lng);
-  if (driverId) setVehicleLocation(driverId, lat, lng);
+  if (isNaN(lat) || isNaN(lng) || Math.abs(lat) < 0.001 || Math.abs(lng) < 0.001) return;
+
+  const extra = {
+    vehicleNumber,
+    driverId,
+  };
+
+  if (vehicleId) setVehicleLocation(vehicleId, lat, lng, extra);
+  if (vehicleNumber) setVehicleLocation(vehicleNumber, lat, lng, extra);
+  if (driverId) setVehicleLocation(driverId, lat, lng, extra);
 
   // Check all active in-transit students assigned to this vehicle/driver
   const promises = [];
   for (const [studentId, transit] of inTransitStudents.entries()) {
     const isSameVehicle =
-      transit.vehicleId === vehicleId ||
-      transit.vehicleNumber === vehicleId ||
+      (vehicleId && (transit.vehicleId === vehicleId || transit.vehicleNumber === vehicleId)) ||
+      (vehicleNumber && (transit.vehicleId === vehicleNumber || transit.vehicleNumber === vehicleNumber)) ||
       (driverId && transit.driverId === driverId);
 
     if (isSameVehicle) {
@@ -883,6 +1087,16 @@ const closeAlertById = async (alertId, reason, io) => {
 
     // 2. Find Driver and Coordinator assigned to this vehicle to send resolution notifications
     try {
+      // Clean up previous active missing alert notifications for this student
+      if (resolved.studentId) {
+        await prisma.notification.deleteMany({
+          where: {
+            type: "missing_alert",
+            data: { contains: `"studentId":"${resolved.studentId}"` },
+          },
+        }).catch(() => { });
+      }
+
       const vehicle = await prisma.vehicle.findFirst({
         where: {
           OR: [
@@ -1079,7 +1293,6 @@ const endStudentTransit = async ({ studentId, reason = "Arrived at College", io 
       await closeAlertById(alert.id, reason, io);
     }
 
-    console.log(`[missingAlertService] 🔴 Student ${studentId} transit ended. Reason: "${reason}". Active alerts closed.`);
   } catch (err) {
     console.error("[missingAlertService] endStudentTransit error:", err.message);
   }
@@ -1109,8 +1322,6 @@ const endVehicleTransit = async ({ vehicleId, reason = "Trip Completed", io }) =
     for (const alert of activeAlerts) {
       await closeAlertById(alert.id, reason, io);
     }
-
-    console.log(`[missingAlertService] 🔴 Vehicle ${vehicleId} transit ended. Reason: "${reason}". Active alerts closed.`);
   } catch (err) {
     console.error("[missingAlertService] endVehicleTransit error:", err.message);
   }
@@ -1156,7 +1367,7 @@ const cleanupDuplicateActiveAlerts = async () => {
 };
 
 // Run duplicate cleanup on startup
-cleanupDuplicateActiveAlerts().catch(() => {});
+cleanupDuplicateActiveAlerts().catch(() => { });
 
 /**
  * Get all active missing alerts for today (strictly 1 active alert per student+vehicle)

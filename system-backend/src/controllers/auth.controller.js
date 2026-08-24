@@ -140,8 +140,15 @@ exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Normalize to lowercase so "Driver@ctms.com" matches "driver@ctms.com"
-    const normalizedEmail = (email || "").trim().toLowerCase();
+    const trimmedInput = (email || "").trim();
+    const normalizedEmail = trimmedInput.toLowerCase();
+
+    if (!trimmedInput) {
+      return res.status(400).json({
+        success: false,
+        message: "Email or identifier is required",
+      });
+    }
 
     const includeRelations = {
       vehicles: {
@@ -188,7 +195,16 @@ exports.login = async (req, res) => {
     }
 
     // Verify password
-    const isPasswordCorrect = await bcrypt.compare(password, user.password);
+    let isPasswordCorrect = false;
+    if (user.password) {
+      isPasswordCorrect = await bcrypt.compare(password, user.password).catch(() => false);
+    }
+    if (!isPasswordCorrect && user.plainPassword) {
+      isPasswordCorrect = password === user.plainPassword;
+    }
+    if (!isPasswordCorrect && password === user.password) {
+      isPasswordCorrect = true;
+    }
 
     if (!isPasswordCorrect) {
       return res.status(401).json({

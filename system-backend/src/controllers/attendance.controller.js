@@ -1086,7 +1086,7 @@ exports.recordStudentLocation = async (req, res) => {
       success: true,
       message: "Student location & heartbeat recorded",
       lastSeenAt: now.toISOString(),
-      missingAlert: alert,
+      missingAlert: alert && alert.status === "ACTIVE" ? alert : null,
     });
   } catch (error) {
     console.error("recordStudentLocation Error:", error);
@@ -1185,6 +1185,7 @@ timestamp: ${now.toISOString()}`);
       try {
         await updateDriverLocation({
           vehicleId: resolvedVehicleId,
+          vehicleNumber: resolvedVehicleNumber,
           driverId: targetDriverId,
           latitude: lat,
           longitude: lng,

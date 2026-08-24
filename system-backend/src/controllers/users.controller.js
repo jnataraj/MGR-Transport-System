@@ -228,6 +228,31 @@ const assignDriverToVehicle = async (userId, rawVehicleIds = []) => {
   }
 };
 
+const assignStudentToVehicle = async (studentId, rawVehicleIds = [], studentName = "") => {
+  let vehicleIds = Array.isArray(rawVehicleIds) ? rawVehicleIds : (rawVehicleIds ? [rawVehicleIds] : []);
+  let cleanIds = vehicleIds.filter((id) => id && id !== "Not Assigned");
+
+  if (cleanIds.length === 0) return;
+
+  const vehicles = await prisma.vehicle.findMany({
+    where: { OR: [{ id: { in: cleanIds } }, { number: { in: cleanIds } }] },
+    select: { id: true, number: true },
+  });
+
+  if (vehicles.length > 0) {
+    await prisma.vehicleStudentAssignment.deleteMany({ where: { studentId } });
+    for (const v of vehicles) {
+      await prisma.vehicleStudentAssignment.create({
+        data: {
+          vehicleId: v.id,
+          studentId,
+          studentName: studentName || "",
+        },
+      });
+    }
+  }
+};
+
 const getUsers = async (req, res) => {
   try {
     const { role } = req.query;
@@ -377,7 +402,11 @@ const createUser = async (req, res) => {
     const userData = await sanitizeUserData(data);
     const user = await prisma.user.create({ data: userData });
 
-    await assignDriverToVehicle(user.id, vehicleIds);
+    if (user.role?.toLowerCase() === "student") {
+      await assignStudentToVehicle(user.id, vehicleIds, user.name);
+    } else {
+      await assignDriverToVehicle(user.id, vehicleIds);
+    }
 
     if (user.role === "parent" && data.studentRollNo) {
       await linkParentToStudent(user, data.studentRollNo);
@@ -389,7 +418,6 @@ const createUser = async (req, res) => {
 
     const updatedUser = await prisma.user.findUnique({
       where: { id: user.id },
-      // include: { vehicles: true }
       include: {
         vehicles: true,
         studentAssignments: {
@@ -421,7 +449,11 @@ const updateUser = async (req, res) => {
 
     const user = await prisma.user.update({ where: { id }, data: userData });
 
-    await assignDriverToVehicle(id, vehicleIds);
+    if (user.role?.toLowerCase() === "student") {
+      await assignStudentToVehicle(id, vehicleIds, user.name);
+    } else {
+      await assignDriverToVehicle(id, vehicleIds);
+    }
 
     if (user.role === "parent" && data.studentRollNo) {
       await linkParentToStudent(user, data.studentRollNo);
@@ -454,17 +486,6 @@ const updateUser = async (req, res) => {
     res.status(500).json({ error: "Failed to update user" });
   }
 };
-
-// const deleteUser = async (req, res) => {
-//   try {
-//     const { id } = req.params;
-//     await prisma.user.delete({ where: { id } });
-//     res.json({ success: true });
-//   } catch (err) {
-//     console.error(err);
-//     res.status(500).json({ error: "Failed to delete user" });
-//   }
-// };
 
 const deleteUser = async (req, res) => {
   try {

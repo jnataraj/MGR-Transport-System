@@ -66,8 +66,10 @@ export function useMainDashboard({ user, token, onLogout }) {
 
   // Route Alert Notifications
   const [routeAlerts, setRouteAlerts] = useState([]);
+  const [routeAlertHistory, setRouteAlertHistory] = useState([]);
   const [showRouteAlertHistory, setShowRouteAlertHistory] = useState(false);
   const [unreadAlerts, setUnreadAlerts] = useState(0);
+  const inFlightReadIdsRef = useRef(new Set());
   const [isBreakdownModalOpen, setIsBreakdownModalOpen] = useState(false);
   const [isAccidentConfirmOpen, setIsAccidentConfirmOpen] = useState(false);
   const [isOthersConfirmOpen, setIsOthersConfirmOpen] = useState(false);
@@ -299,30 +301,58 @@ export function useMainDashboard({ user, token, onLogout }) {
     (i) => i.status === "Pending" || i.status === "Acknowledged" || i.status === "open",
   );
 
+  const fetchAllNotifications = async () => {
+    if (!token) return;
+    try {
+      const [notifRes, historyRes] = await Promise.all([
+        fetch(`${API_BASE}/api/notifications`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        fetch(`${API_BASE}/api/notifications/route-alerts`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+      ]);
+
+      const notifData = await notifRes.json().catch(() => ({}));
+      if (notifData.success && Array.isArray(notifData.notifications)) {
+        const unread = notifData.notifications.filter((n) => !n.isRead);
+        const mapped = unread.map(mapNotificationToAlert);
+        setRouteAlerts(mapped);
+        setUnreadAlerts(mapped.length);
+      }
+
+      const historyData = await historyRes.json().catch(() => ({}));
+      if (historyData.success) {
+        const combinedHistory = [
+          ...(historyData.routeAlerts || []).map((r) => ({
+            ...r,
+            notificationType: r.notificationType || "RouteChange",
+            isRead: true,
+          })),
+          ...(historyData.missingAlerts || []).map((m) => ({
+            id: m.id,
+            notificationType: m.status === "RESOLVED" ? "missing_alert_resolved" : "missing_alert",
+            routeName: m.status === "RESOLVED" ? "✅ Student Missing Alert Resolved" : "🚨 Student Missing Alert",
+            customMessage: m.status === "RESOLVED" ? `Student ${m.studentName} resolved (${m.resolvedReason || "Rejoined"}).` : `Student ${m.studentName} is ${m.distanceMeters || "10+"}m away.`,
+            effectiveDate: m.alertTime ? new Date(m.alertTime).toISOString().split("T")[0] : "",
+            effectiveTime: m.alertTime ? new Date(m.alertTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "",
+            receivedAt: m.alertTime || m.createdAt,
+            status: m.status,
+            isRead: m.status === "RESOLVED",
+          })),
+        ];
+        combinedHistory.sort((a, b) => new Date(b.receivedAt || b.createdAt || 0) - new Date(a.receivedAt || a.createdAt || 0));
+        setRouteAlertHistory(combinedHistory);
+      }
+    } catch (err) {
+      console.log("Notifications fetch error:", err);
+    }
+  };
+
   useEffect(() => {
     if (token) {
       registerForPushNotificationsAsync(token);
-
-      fetch(`${API_BASE}/api/notifications`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.success && Array.isArray(data.notifications)) {
-            const unread = data.notifications.filter((n) => !n.isRead);
-            const mapped = unread.map(mapNotificationToAlert);
-            setRouteAlerts((prev) => {
-              const existingIds = new Set(prev.map((a) => a.id));
-              const newOnes = mapped.filter((a) => !existingIds.has(a.id));
-              // Bump the badge only for truly new notifications added to the list
-              if (newOnes.length > 0) {
-                setUnreadAlerts((c) => c + newOnes.length);
-              }
-              return [...newOnes, ...prev];
-            });
-          }
-        })
-        .catch((err) => console.log("Notifications fetch error:", err));
+      fetchAllNotifications();
     }
   }, [token]);
 
@@ -384,24 +414,181 @@ export function useMainDashboard({ user, token, onLogout }) {
       socketRef.current.on("routeAlert", (alert) => {
         setRouteAlerts((prev) => {
           if (prev.some((a) => a.id === alert.id)) return prev;
-          return [
-            {
-              ...alert,
-              receivedAt: alert.receivedAt || new Date().toISOString(),
-            },
-            ...prev,
-          ];
+          const newAlert = {
+            ...alert,
+            receivedAt: alert.receivedAt || new Date().toISOString(),
+          };
+          setUnreadAlerts((c) => c + 1);
+          return [newAlert, ...prev];
         });
-        setUnreadAlerts((prev) => prev + 1);
+        setRouteAlertHistory((prev) => {
+          if (prev.some((a) => a.id === alert.id)) return prev;
+          return [{ ...alert, receivedAt: alert.receivedAt || new Date().toISOString() }, ...prev];
+        });
       });
 
       socketRef.current.on("new_notification", (notif) => {
         const alert = mapNotificationToAlert(notif);
         setRouteAlerts((prev) => {
+          let parsedData = {};
+          try {
+            parsedData = typeof notif.data === "string" ? JSON.parse(notif.data || "{}") : (notif.data || {});
+          } catch {}
+          const notifStudentId = parsedData.studentId;
+
+          // If this is a missing alert, deduplicate by studentId or alert id
+          if (alert.notificationType === "missing_alert" || notif.type === "missing_alert") {
+            const index = prev.findIndex(
+              (p) =>
+                p.id === alert.id ||
+                p.id === parsedData.alertId ||
+                (notifStudentId && p.studentId === notifStudentId)
+            );
+            if (index !== -1) {
+              const updated = [...prev];
+              updated[index] = { ...updated[index], ...alert, studentId: notifStudentId || updated[index].studentId };
+              return updated;
+            }
+          }
+
+          if (prev.some((a) => a.id === alert.id)) return prev;
+          setUnreadAlerts((prevCount) => prevCount + 1);
+          return [alert, ...prev];
+        });
+
+        setRouteAlertHistory((prev) => {
           if (prev.some((a) => a.id === alert.id)) return prev;
           return [alert, ...prev];
         });
-        setUnreadAlerts((prev) => prev + 1);
+      });
+
+      // ── Real-Time Student Missing Alert for Driver / Coordinator ──
+      socketRef.current.on("driver_student_missing_alert", (alert) => {
+        const studentName = alert.studentName || "Student";
+        const dist = alert.distanceMeters ?? "10+";
+        const alertMsg = `Student: ${studentName}\nDistance: ${dist} m\nPlease check the student's location.`;
+
+        const updatedCard = {
+          id: alert.id,
+          title: "🚨 Student Missing Alert",
+          routeName: "🚨 Student Missing Alert",
+          message: alertMsg,
+          customMessage: alertMsg,
+          notificationType: "missing_alert",
+          studentId: alert.studentId,
+          studentName,
+          distanceMeters: dist,
+          effectiveDate: new Date().toISOString().split("T")[0],
+          effectiveTime: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          receivedAt: new Date().toISOString(),
+          status: "ACTIVE",
+        };
+
+        setRouteAlerts((prev) => {
+          const existingIndex = prev.findIndex(
+            (p) =>
+              p.id === alert.id ||
+              (p.studentId && alert.studentId && p.studentId === alert.studentId) ||
+              (p.notificationType === "missing_alert" && p.studentName === studentName && p.status !== "RESOLVED")
+          );
+
+          if (existingIndex !== -1) {
+            // Update existing alert card in place
+            const updated = [...prev];
+            updated[existingIndex] = { ...updated[existingIndex], ...updatedCard };
+            return updated;
+          }
+
+          Alert.alert("🚨 Student Missing Alert", alertMsg, [{ text: "OK" }]);
+          setUnreadAlerts((c) => c + 1);
+          return [updatedCard, ...prev];
+        });
+
+        setRouteAlertHistory((prev) => {
+          const existingIndex = prev.findIndex((p) => p.id === alert.id);
+          if (existingIndex !== -1) {
+            const updated = [...prev];
+            updated[existingIndex] = { ...updated[existingIndex], ...updatedCard };
+            return updated;
+          }
+          return [updatedCard, ...prev];
+        });
+      });
+
+      socketRef.current.on("student_missing_alert_resolved", (res) => {
+        const resolvedTitle = "✅ Student Missing Alert Resolved";
+        const resolvedMsg = `Student ${res.studentName || "Student"} has rejoined the vehicle / resolved (${res.resolvedReason || "Closed"}).`;
+
+        setRouteAlerts((prev) => {
+          const existingIdx = prev.findIndex(
+            (a) => a.id === res.id || (a.studentId && res.studentId && a.studentId === res.studentId)
+          );
+          if (existingIdx !== -1) {
+            const updated = [...prev];
+            updated[existingIdx] = {
+              ...updated[existingIdx],
+              status: "RESOLVED",
+              notificationType: "missing_alert_resolved",
+              routeName: resolvedTitle,
+              title: resolvedTitle,
+              customMessage: resolvedMsg,
+              message: resolvedMsg,
+              resolvedReason: res.resolvedReason,
+              resolvedAt: res.resolvedAt,
+            };
+            return updated;
+          }
+          const newResolved = {
+            id: res.id || `res-${Date.now()}`,
+            studentId: res.studentId,
+            studentName: res.studentName,
+            title: resolvedTitle,
+            routeName: resolvedTitle,
+            message: resolvedMsg,
+            customMessage: resolvedMsg,
+            notificationType: "missing_alert_resolved",
+            effectiveDate: new Date().toISOString().split("T")[0],
+            effectiveTime: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            receivedAt: new Date().toISOString(),
+            status: "RESOLVED",
+          };
+          setUnreadAlerts((c) => c + 1);
+          return [newResolved, ...prev];
+        });
+
+        setRouteAlertHistory((prev) => {
+          const existingIdx = prev.findIndex(
+            (a) => a.id === res.id || (a.studentId && res.studentId && a.studentId === res.studentId)
+          );
+          if (existingIdx !== -1) {
+            const updated = [...prev];
+            updated[existingIdx] = {
+              ...updated[existingIdx],
+              status: "RESOLVED",
+              notificationType: "missing_alert_resolved",
+              routeName: resolvedTitle,
+              title: resolvedTitle,
+              customMessage: resolvedMsg,
+              message: resolvedMsg,
+              resolvedReason: res.resolvedReason,
+              resolvedAt: res.resolvedAt,
+            };
+            return updated;
+          }
+          return [
+            {
+              id: res.id || `res-${Date.now()}`,
+              routeName: resolvedTitle,
+              title: resolvedTitle,
+              customMessage: resolvedMsg,
+              message: resolvedMsg,
+              notificationType: "missing_alert_resolved",
+              status: "RESOLVED",
+              receivedAt: new Date().toISOString(),
+            },
+            ...prev,
+          ];
+        });
       });
     })();
 
@@ -695,22 +882,76 @@ source: DriverApp-handleQRScan-STARTED`);
   };
 
   const handleNotificationAction = async (alert, actionLabel) => {
+    if (!alert || !alert.id) return;
+    const alertId = alert.id;
+
+    // Prevent duplicate in-flight requests for the same notification
+    if (inFlightReadIdsRef.current.has(alertId)) return;
+    inFlightReadIdsRef.current.add(alertId);
+
+    // Save previous state for rollback if request fails
+    const previousRouteAlerts = [...routeAlerts];
+    const previousUnreadCount = unreadAlerts;
+
+    // Optimistic UI updates: immediately remove from unread and decrement count
+    setRouteAlerts((prev) => prev.filter((a) => a.id !== alertId));
+    setUnreadAlerts((c) => Math.max(0, c - 1));
+    setRouteAlertHistory((prev) =>
+      prev.map((a) => (a.id === alertId ? { ...a, isRead: true } : a))
+    );
+
     try {
-      if (alert.id && !String(alert.id).startsWith("demo-")) {
-        await fetch(`${API_BASE}/api/notifications/${alert.id}/read`, {
+      if (!String(alertId).startsWith("demo-")) {
+        const response = await fetch(`${API_BASE}/api/notifications/${alertId}/read`, {
           method: "PUT",
           headers: authHeaders,
         });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.success === false) {
+          throw new Error(data.message || "Failed to mark notification as read");
+        }
+      }
+      if (actionLabel) {
+        Alert.alert(actionLabel, alert.routeName || alert.title || "Notification marked as read.");
       }
     } catch (err) {
-      console.log("Failed to mark notification read:", err);
+      console.log("Failed to mark notification read in backend:", err.message);
+      // Rollback optimistic update
+      setRouteAlerts(previousRouteAlerts);
+      setUnreadAlerts(previousUnreadCount);
+      Alert.alert("Error", "Could not mark notification as read. Please check your connection.");
     } finally {
-      // Remove from list and decrement the badge count (floor at 0)
-      setRouteAlerts((prev) => prev.filter((a) => a.id !== alert.id));
-      setUnreadAlerts((c) => Math.max(0, c - 1));
-      if (actionLabel) {
-        Alert.alert(actionLabel, alert.routeName || "Notification updated.");
-      }
+      inFlightReadIdsRef.current.delete(alertId);
+    }
+  };
+
+  const markAllNotificationsAsRead = async () => {
+    if (routeAlerts.length === 0) return;
+
+    const previousRouteAlerts = [...routeAlerts];
+    const previousUnreadCount = unreadAlerts;
+
+    // Optimistically clear all unread
+    setRouteAlerts([]);
+    setUnreadAlerts(0);
+    setRouteAlertHistory((prev) => prev.map((a) => ({ ...a, isRead: true })));
+
+    try {
+      await Promise.all(
+        previousRouteAlerts.map(async (alert) => {
+          if (alert.id && !String(alert.id).startsWith("demo-")) {
+            await fetch(`${API_BASE}/api/notifications/${alert.id}/read`, {
+              method: "PUT",
+              headers: authHeaders,
+            });
+          }
+        })
+      );
+    } catch (err) {
+      console.log("Error marking all notifications read:", err.message);
+      setRouteAlerts(previousRouteAlerts);
+      setUnreadAlerts(previousUnreadCount);
+      Alert.alert("Error", "Could not mark all notifications as read.");
     }
   };
 
@@ -868,11 +1109,15 @@ source: DriverApp-handleQRScan-STARTED`);
     // Notifications
     routeAlerts,
     setRouteAlerts,
+    routeAlertHistory,
+    setRouteAlertHistory,
     unreadAlerts,
     setUnreadAlerts,
     showRouteAlertHistory,
     setShowRouteAlertHistory,
     handleNotificationAction,
+    markAllNotificationsAsRead,
+    fetchAllNotifications,
 
     // Maintenance
     isMaintLogModalOpen,

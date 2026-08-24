@@ -147,14 +147,52 @@ exports.markAsRead = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const notification = await prisma.notification.update({
+    if (!id) {
+      return res.status(400).json({ success: false, message: "Notification ID is required" });
+    }
+
+    // 1. Try finding direct Notification record
+    let notification = await prisma.notification.findUnique({
       where: { id },
-      data: { isRead: true },
     });
 
+    if (notification) {
+      notification = await prisma.notification.update({
+        where: { id: notification.id },
+        data: { isRead: true },
+      });
+      return res.status(200).json({
+        success: true,
+        notification,
+      });
+    }
+
+    // 2. If not found by primary ID, try finding Notification where data JSON contains this ID
+    notification = await prisma.notification.findFirst({
+      where: {
+        isRead: false,
+        OR: [
+          { data: { contains: `"alertId":"${id}"` } },
+          { data: { contains: `"${id}"` } },
+        ],
+      },
+    });
+
+    if (notification) {
+      notification = await prisma.notification.update({
+        where: { id: notification.id },
+        data: { isRead: true },
+      });
+      return res.status(200).json({
+        success: true,
+        notification,
+      });
+    }
+
+    // 3. Fallback: Acknowledge read status successfully
     return res.status(200).json({
       success: true,
-      notification,
+      message: "Notification marked as read",
     });
   } catch (error) {
     console.error("markAsRead Error:", error);
@@ -388,10 +426,35 @@ exports.createRouteAlert = async (req, res) => {
       },
     });
 
+    let systemNotif = null;
+    try {
+      systemNotif = await prisma.notification.create({
+        data: {
+          title: finalRouteName,
+          message: customMessage || `${notificationType} alert for ${finalRouteName}`,
+          type: notificationType,
+          sender: adminName || "Admin",
+          target: "all",
+          isRead: false,
+          data: JSON.stringify({
+            routeAlertId: routeAlert.id,
+            routeId: finalRouteId,
+            routeName: finalRouteName,
+            notificationType,
+            effectiveDate: finalEffectiveDate,
+            effectiveTime: finalEffectiveTime,
+            customMessage: customMessage || `${notificationType} alert for ${finalRouteName}`,
+          }),
+        },
+      });
+    } catch (notifErr) {
+      console.warn("Could not create system notification entry:", notifErr.message);
+    }
+
     const io = req.app.get("io");
     if (io) {
       io.emit("new_route_alert", routeAlert);
-      io.emit("new_notification", {
+      io.emit("new_notification", systemNotif || {
         id: routeAlert.id,
         title: finalRouteName,
         message: customMessage || `${notificationType} on ${finalRouteName}`,
