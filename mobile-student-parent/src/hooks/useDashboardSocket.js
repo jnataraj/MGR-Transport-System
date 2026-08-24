@@ -34,28 +34,39 @@ export default function useDashboardSocket({ user, role }) {
 
     socket.on("new_notification", (notification) => {
       const alert = mapNotificationToAlert(notification);
-      setRouteAlerts((previous) => {
-        let parsedData = {};
-        try {
-          parsedData = typeof notification.data === "string" ? JSON.parse(notification.data || "{}") : (notification.data || {});
-        } catch {}
-        const notifStudentId = parsedData.studentId;
+      let parsedData = {};
+      try {
+        parsedData = typeof notification.data === "string" ? JSON.parse(notification.data || "{}") : (notification.data || {});
+      } catch {}
+      const missingId = parsedData.missingAlertId || parsedData.alertId || parsedData.id;
+      const notifStudentId = parsedData.studentId;
 
-        if (alert.notificationType === "missing_alert" || notification.type === "missing_alert") {
+      setRouteAlerts((previous) => {
+        if (
+          alert.notificationType === "missing_alert" ||
+          alert.notificationType === "missing_alert_resolved" ||
+          notification.type === "missing_alert" ||
+          notification.type === "missing_alert_resolved"
+        ) {
           const index = previous.findIndex(
             (p) =>
-              p.id === alert.id ||
-              p.id === parsedData.alertId ||
+              (missingId && (p.missingAlertId === missingId || p.id === missingId || p.alertId === missingId)) ||
+              (p.id === alert.id) ||
               (notifStudentId && p.studentId === notifStudentId)
           );
           if (index !== -1) {
             const updated = [...previous];
-            updated[index] = { ...updated[index], ...alert, studentId: notifStudentId || updated[index].studentId };
+            updated[index] = {
+              ...updated[index],
+              ...alert,
+              missingAlertId: missingId || updated[index].missingAlertId,
+              studentId: notifStudentId || updated[index].studentId,
+            };
             return updated;
           }
         }
 
-        if (previous.some((item) => item.id === alert.id)) return previous;
+        if (previous.some((item) => item.id === alert.id || (missingId && item.missingAlertId === missingId))) return previous;
         setUnreadAlerts((count) => count + 1);
         return [alert, ...previous];
       });
@@ -66,17 +77,21 @@ export default function useDashboardSocket({ user, role }) {
         const studentName = alert.studentName || "Your Child";
         const dist = alert.distanceMeters ?? "10+";
         const alertMsg = `Alert: Student ${studentName} is more than 10 meters (${dist} m) away from assigned vehicle ${alert.vehicleNumber || ""}. Please check student status.`;
+        const alertIncidentId = alert.id;
 
         setRouteAlerts((previous) => {
           const existingIndex = previous.findIndex(
             (p) =>
-              p.id === alert.id ||
+              p.id === alertIncidentId ||
+              p.missingAlertId === alertIncidentId ||
               (p.studentId && alert.studentId && p.studentId === alert.studentId) ||
               (p.notificationType === "missing_alert" && p.studentName === studentName && p.status !== "RESOLVED")
           );
 
           const updatedCard = {
-            id: alert.id || Date.now().toString(),
+            id: alertIncidentId || Date.now().toString(),
+            missingAlertId: alertIncidentId,
+            alertId: alertIncidentId,
             title: "🚨 Student Missing Alert",
             message: alertMsg,
             notificationType: "missing_alert",
@@ -104,19 +119,44 @@ export default function useDashboardSocket({ user, role }) {
 
     socket.on("student_missing_alert_resolved", (res) => {
       if (role === "parent" || role === "hod") {
-        setRouteAlerts((previous) =>
-          previous.map((a) =>
-            a.id === res.id || (a.studentId && res.studentId && a.studentId === res.studentId)
-              ? {
-                  ...a,
-                  status: "RESOLVED",
-                  message: `✅ ${a.studentName || "Student"} — Resolved (${res.resolvedReason || "Closed"}).`,
-                  resolvedReason: res.resolvedReason,
-                  resolvedAt: res.resolvedAt,
-                }
-              : a
-          )
-        );
+        const alertIncidentId = res.id || res.missingAlertId || res.alertId;
+        setRouteAlerts((previous) => {
+          const existingIdx = previous.findIndex(
+            (a) =>
+              (alertIncidentId && (a.id === alertIncidentId || a.missingAlertId === alertIncidentId || a.alertId === alertIncidentId)) ||
+              (a.studentId && res.studentId && a.studentId === res.studentId)
+          );
+
+          if (existingIdx !== -1) {
+            const updated = [...previous];
+            updated[existingIdx] = {
+              ...updated[existingIdx],
+              status: "RESOLVED",
+              missingAlertId: alertIncidentId || updated[existingIdx].missingAlertId,
+              message: `✅ ${updated[existingIdx].studentName || res.studentName || "Student"} — Resolved (${res.resolvedReason || "Closed"}).`,
+              resolvedReason: res.resolvedReason,
+              resolvedAt: res.resolvedAt,
+            };
+            return updated;
+          }
+
+          return [
+            {
+              id: alertIncidentId || `res-${Date.now()}`,
+              missingAlertId: alertIncidentId,
+              studentId: res.studentId,
+              studentName: res.studentName,
+              notificationType: "missing_alert_resolved",
+              title: "✅ Student Missing Alert Resolved",
+              message: `✅ ${res.studentName || "Student"} — Resolved (${res.resolvedReason || "Closed"}).`,
+              status: "RESOLVED",
+              resolvedReason: res.resolvedReason,
+              resolvedAt: res.resolvedAt,
+              receivedAt: new Date().toISOString(),
+            },
+            ...previous,
+          ];
+        });
       }
     });
 

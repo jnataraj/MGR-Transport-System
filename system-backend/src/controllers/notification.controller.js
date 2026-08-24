@@ -132,9 +132,31 @@ exports.getUserNotifications = async (req, res) => {
       take: 50,
     });
 
+    // Deduplicate notifications by unique incident ID for missing alerts
+    const deduped = [];
+    const seenIncidentKeys = new Set();
+
+    for (const notif of notifications) {
+      if (notif.type === "missing_alert" || notif.type === "missing_alert_resolved") {
+        let parsed = {};
+        try {
+          parsed = typeof notif.data === "string" ? JSON.parse(notif.data || "{}") : (notif.data || {});
+        } catch {}
+        const incidentId = parsed.missingAlertId || parsed.alertId || parsed.id || (parsed.studentId ? `student_${parsed.studentId}` : null);
+        if (incidentId) {
+          const key = `missing_${incidentId}`;
+          if (seenIncidentKeys.has(key)) {
+            continue;
+          }
+          seenIncidentKeys.add(key);
+        }
+      }
+      deduped.push(notif);
+    }
+
     return res.status(200).json({
       success: true,
-      notifications,
+      notifications: deduped,
     });
   } catch (error) {
     console.error("getUserNotifications Error:", error);
@@ -168,24 +190,28 @@ exports.markAsRead = async (req, res) => {
     }
 
     // 2. If not found by primary ID, try finding Notification where data JSON contains this ID
-    notification = await prisma.notification.findFirst({
+    const matchingNotifs = await prisma.notification.findMany({
       where: {
         isRead: false,
         OR: [
+          { data: { contains: `"missingAlertId":"${id}"` } },
           { data: { contains: `"alertId":"${id}"` } },
+          { data: { contains: `"id":"${id}"` } },
           { data: { contains: `"${id}"` } },
         ],
       },
     });
 
-    if (notification) {
-      notification = await prisma.notification.update({
-        where: { id: notification.id },
+    if (matchingNotifs.length > 0) {
+      await prisma.notification.updateMany({
+        where: {
+          id: { in: matchingNotifs.map((n) => n.id) },
+        },
         data: { isRead: true },
       });
       return res.status(200).json({
         success: true,
-        notification,
+        notification: matchingNotifs[0],
       });
     }
 

@@ -1045,18 +1045,34 @@ const updateDriverLocation = async ({
  * Close/resolve an alert by ID
  */
 const closeAlertById = async (alertId, reason, io) => {
+  if (!alertId) return null;
+
   try {
-    const resolved = await prisma.studentMissingAlert.update({
+    const existing = await prisma.studentMissingAlert.findUnique({
       where: { id: alertId },
-      data: {
-        status: "RESOLVED",
-        resolvedAt: new Date(),
-        resolvedReason: reason,
-      },
     });
+
+    if (!existing) {
+      console.warn(`[missingAlertService] Alert ${alertId} not found to resolve.`);
+      return null;
+    }
+
+    let resolved = existing;
+    if (existing.status !== "RESOLVED") {
+      resolved = await prisma.studentMissingAlert.update({
+        where: { id: alertId },
+        data: {
+          status: "RESOLVED",
+          resolvedAt: new Date(),
+          resolvedReason: reason,
+        },
+      });
+    }
 
     const payload = {
       id: resolved.id,
+      missingAlertId: resolved.id,
+      alertId: resolved.id,
       studentId: resolved.studentId,
       studentName: resolved.studentName,
       vehicleId: resolved.vehicleId,
@@ -1067,36 +1083,26 @@ const closeAlertById = async (alertId, reason, io) => {
       resolvedAt: resolved.resolvedAt,
     };
 
-    // 1. Socket emissions
+    // Clean up previous active missing alert notifications for this student
+    if (resolved.studentId) {
+      await prisma.notification.deleteMany({
+        where: {
+          type: "missing_alert",
+          data: { contains: `"studentId":"${resolved.studentId}"` },
+        },
+      }).catch(() => { });
+    }
+
+    // 1. Emit resolution event to connected clients (Single broadcast)
     if (io) {
       if (typeof io.emit === "function") {
         io.emit("student_missing_alert_resolved", payload);
         io.emit("missing_alert_closed", payload);
       }
-
-      if (typeof io.to === "function") {
-        io.to("admin").emit("student_missing_alert_resolved", payload);
-        io.to("superadmin").emit("student_missing_alert_resolved", payload);
-        io.to("deptadmin").emit("student_missing_alert_resolved", payload);
-
-        if (resolved.driverId) {
-          io.to(`user_${resolved.driverId}`).emit("student_missing_alert_resolved", payload);
-        }
-      }
     }
 
-    // 2. Find Driver and Coordinator assigned to this vehicle to send resolution notifications
+    // 2. Create resolution notifications idempotently
     try {
-      // Clean up previous active missing alert notifications for this student
-      if (resolved.studentId) {
-        await prisma.notification.deleteMany({
-          where: {
-            type: "missing_alert",
-            data: { contains: `"studentId":"${resolved.studentId}"` },
-          },
-        }).catch(() => { });
-      }
-
       const vehicle = await prisma.vehicle.findFirst({
         where: {
           OR: [
@@ -1115,75 +1121,117 @@ const closeAlertById = async (alertId, reason, io) => {
       const resTitle = "✅ Student Missing Alert Resolved";
       const resMessage = `Student ${resolved.studentName} has rejoined the vehicle / resolved (${reason}).`;
 
-      // Resolution notification for Web Admin
-      const adminNotif = await prisma.notification.create({
-        data: {
-          title: resTitle,
-          message: resMessage,
+      // 2a. Resolution notification for Web Admin (Strictly 1 per missingAlertId)
+      const existingAdminNotif = await prisma.notification.findFirst({
+        where: {
           type: "missing_alert_resolved",
-          sender: "System",
           target: "admin",
-          data: JSON.stringify(payload),
+          OR: [
+            { data: { contains: `"missingAlertId":"${resolved.id}"` } },
+            { data: { contains: `"alertId":"${resolved.id}"` } },
+            { data: { contains: `"id":"${resolved.id}"` } },
+          ],
         },
       });
 
-      if (io && typeof io.to === "function") {
-        io.to("admin").emit("new_notification", adminNotif);
-        io.to("superadmin").emit("new_notification", adminNotif);
-        io.to("deptadmin").emit("new_notification", adminNotif);
-      }
-
-      // Resolution notification for Assigned Driver
-      const driverUser = vehicle?.driver || (resolved.driverId ? await prisma.user.findUnique({ where: { id: resolved.driverId } }) : null);
-      if (driverUser) {
-        const driverNotif = await prisma.notification.create({
+      if (!existingAdminNotif) {
+        const adminNotif = await prisma.notification.create({
           data: {
             title: resTitle,
             message: resMessage,
             type: "missing_alert_resolved",
             sender: "System",
-            target: "driver",
-            userId: driverUser.id,
+            target: "admin",
             data: JSON.stringify(payload),
           },
         });
 
         if (io && typeof io.to === "function") {
-          io.to(`user_${driverUser.id}`).emit("student_missing_alert_resolved", payload);
-          io.to(`user_${driverUser.id}`).emit("new_notification", driverNotif);
-        }
-
-        if (driverUser.pushToken) {
-          await sendPushNotification([driverUser.pushToken], resTitle, resMessage, payload);
+          io.to("admin").emit("new_notification", adminNotif);
+          io.to("superadmin").emit("new_notification", adminNotif);
+          io.to("deptadmin").emit("new_notification", adminNotif);
         }
       }
 
-      // Resolution notification for Assigned Coordinator(s)
+      // 2b. Resolution notification for Assigned Driver (Strictly 1 per driver + missingAlertId)
+      const driverUser = vehicle?.driver || (resolved.driverId ? await prisma.user.findUnique({ where: { id: resolved.driverId } }) : null);
+      if (driverUser && driverUser.id) {
+        const existingDriverNotif = await prisma.notification.findFirst({
+          where: {
+            type: "missing_alert_resolved",
+            userId: driverUser.id,
+            OR: [
+              { data: { contains: `"missingAlertId":"${resolved.id}"` } },
+              { data: { contains: `"alertId":"${resolved.id}"` } },
+              { data: { contains: `"id":"${resolved.id}"` } },
+            ],
+          },
+        });
+
+        if (!existingDriverNotif) {
+          const driverNotif = await prisma.notification.create({
+            data: {
+              title: resTitle,
+              message: resMessage,
+              type: "missing_alert_resolved",
+              sender: "System",
+              target: "driver",
+              userId: driverUser.id,
+              data: JSON.stringify(payload),
+            },
+          });
+
+          if (io && typeof io.to === "function") {
+            io.to(`user_${driverUser.id}`).emit("new_notification", driverNotif);
+          }
+
+          if (driverUser.pushToken) {
+            await sendPushNotification([driverUser.pushToken], resTitle, resMessage, payload);
+          }
+        }
+      }
+
+      // 2c. Resolution notification for Assigned Coordinator(s) (Strictly 1 per coordinator + missingAlertId)
       const coordinators = (vehicle?.assignedCoordinators || []).map((ac) => ac.coordinator).filter(Boolean);
       for (const coord of coordinators) {
-        const coordNotif = await prisma.notification.create({
-          data: {
-            title: resTitle,
-            message: resMessage,
-            type: "missing_alert_resolved",
-            sender: "System",
-            target: "coordinator",
-            userId: coord.id,
-            data: JSON.stringify(payload),
-          },
-        });
+        if (coord && coord.id) {
+          const existingCoordNotif = await prisma.notification.findFirst({
+            where: {
+              type: "missing_alert_resolved",
+              userId: coord.id,
+              OR: [
+                { data: { contains: `"missingAlertId":"${resolved.id}"` } },
+                { data: { contains: `"alertId":"${resolved.id}"` } },
+                { data: { contains: `"id":"${resolved.id}"` } },
+              ],
+            },
+          });
 
-        if (io && typeof io.to === "function") {
-          io.to(`user_${coord.id}`).emit("student_missing_alert_resolved", payload);
-          io.to(`user_${coord.id}`).emit("new_notification", coordNotif);
-        }
+          if (!existingCoordNotif) {
+            const coordNotif = await prisma.notification.create({
+              data: {
+                title: resTitle,
+                message: resMessage,
+                type: "missing_alert_resolved",
+                sender: "System",
+                target: "coordinator",
+                userId: coord.id,
+                data: JSON.stringify(payload),
+              },
+            });
 
-        if (coord.pushToken) {
-          await sendPushNotification([coord.pushToken], resTitle, resMessage, payload);
+            if (io && typeof io.to === "function") {
+              io.to(`user_${coord.id}`).emit("new_notification", coordNotif);
+            }
+
+            if (coord.pushToken) {
+              await sendPushNotification([coord.pushToken], resTitle, resMessage, payload);
+            }
+          }
         }
       }
 
-      // Resolution notification for Parent(s) of this specific student
+      // 2d. Resolution notification for Parent(s) of this specific student (Strictly 1 per parent + missingAlertId)
       const studentUser = resolved.studentId ? await prisma.user.findUnique({ where: { id: resolved.studentId } }) : null;
       const parentQueries = [];
       if (studentUser?.parentId) parentQueries.push({ id: studentUser.parentId });
@@ -1197,30 +1245,43 @@ const closeAlertById = async (alertId, reason, io) => {
         });
 
         for (const parent of parents) {
-          const parentNotif = await prisma.notification.create({
-            data: {
-              title: resTitle,
-              message: `Student ${resolved.studentName} has rejoined the vehicle / journey resolved (${reason}).`,
+          const existingParentNotif = await prisma.notification.findFirst({
+            where: {
               type: "missing_alert_resolved",
-              sender: "System",
-              target: "parent",
               userId: parent.id,
-              data: JSON.stringify(payload),
+              OR: [
+                { data: { contains: `"missingAlertId":"${resolved.id}"` } },
+                { data: { contains: `"alertId":"${resolved.id}"` } },
+                { data: { contains: `"id":"${resolved.id}"` } },
+              ],
             },
           });
 
-          if (io && typeof io.to === "function") {
-            io.to(`user_${parent.id}`).emit("student_missing_alert_resolved", payload);
-            io.to(`user_${parent.id}`).emit("new_notification", parentNotif);
-          }
+          if (!existingParentNotif) {
+            const parentNotif = await prisma.notification.create({
+              data: {
+                title: resTitle,
+                message: `Student ${resolved.studentName} has rejoined the vehicle / journey resolved (${reason}).`,
+                type: "missing_alert_resolved",
+                sender: "System",
+                target: "parent",
+                userId: parent.id,
+                data: JSON.stringify(payload),
+              },
+            });
 
-          if (parent.pushToken) {
-            await sendPushNotification([parent.pushToken], resTitle, `Student ${resolved.studentName} has rejoined the vehicle / journey resolved (${reason}).`, payload);
+            if (io && typeof io.to === "function") {
+              io.to(`user_${parent.id}`).emit("new_notification", parentNotif);
+            }
+
+            if (parent.pushToken) {
+              await sendPushNotification([parent.pushToken], resTitle, `Student ${resolved.studentName} has rejoined the vehicle / journey resolved (${reason}).`, payload);
+            }
           }
         }
       }
 
-      // Resolution notification for Department HOD
+      // 2e. Resolution notification for Department HOD (Strictly 1 per HOD + missingAlertId)
       if (studentUser?.department) {
         const hods = await prisma.user.findMany({
           where: {
@@ -1235,32 +1296,44 @@ const closeAlertById = async (alertId, reason, io) => {
         });
 
         for (const hod of hods) {
-          const hodNotif = await prisma.notification.create({
-            data: {
-              title: `✅ Student Missing Alert Resolved - ${studentUser.department}`,
-              message: `Student ${resolved.studentName} (${studentUser.rollNumber || "N/A"}) from ${studentUser.department} has rejoined the vehicle / journey resolved (${reason}).`,
+          const existingHodNotif = await prisma.notification.findFirst({
+            where: {
               type: "missing_alert_resolved",
-              sender: "System",
-              target: "hod",
               userId: hod.id,
-              data: JSON.stringify(payload),
+              OR: [
+                { data: { contains: `"missingAlertId":"${resolved.id}"` } },
+                { data: { contains: `"alertId":"${resolved.id}"` } },
+                { data: { contains: `"id":"${resolved.id}"` } },
+              ],
             },
           });
 
-          if (io && typeof io.to === "function") {
-            io.to(`user_${hod.id}`).emit("student_missing_alert_resolved", payload);
-            io.to(`user_${hod.id}`).emit("new_notification", hodNotif);
-          }
+          if (!existingHodNotif) {
+            const hodNotif = await prisma.notification.create({
+              data: {
+                title: `✅ Student Missing Alert Resolved - ${studentUser.department}`,
+                message: `Student ${resolved.studentName} (${studentUser.rollNumber || "N/A"}) from ${studentUser.department} has rejoined the vehicle / journey resolved (${reason}).`,
+                type: "missing_alert_resolved",
+                sender: "System",
+                target: "hod",
+                userId: hod.id,
+                data: JSON.stringify(payload),
+              },
+            });
 
-          if (hod.pushToken) {
-            await sendPushNotification([hod.pushToken], `✅ Student Missing Alert Resolved - ${studentUser.department}`, `Student ${resolved.studentName} from ${studentUser.department} has rejoined the vehicle / journey resolved (${reason}).`, payload);
+            if (io && typeof io.to === "function") {
+              io.to(`user_${hod.id}`).emit("new_notification", hodNotif);
+            }
+
+            if (hod.pushToken) {
+              await sendPushNotification([hod.pushToken], `✅ Student Missing Alert Resolved - ${studentUser.department}`, `Student ${resolved.studentName} from ${studentUser.department} has rejoined the vehicle / journey resolved (${reason}).`, payload);
+            }
           }
         }
       }
     } catch (notifErr) {
       console.error("[missingAlertService] Resolution notification error:", notifErr.message);
     }
-
 
     console.log(`[missingAlertService] ✅ Alert ${alertId} resolved for ${resolved.studentName}. Reason: "${reason}".`);
     return resolved;
@@ -1270,14 +1343,12 @@ const closeAlertById = async (alertId, reason, io) => {
   }
 };
 
-
 /**
  * End a student's active transit journey (e.g. arrived at College/Home, attendance closed)
  */
 const endStudentTransit = async ({ studentId, reason = "Arrived at College", io }) => {
   if (!studentId) return;
 
-  const transit = inTransitStudents.get(studentId);
   inTransitStudents.delete(studentId);
 
   try {
@@ -1292,7 +1363,6 @@ const endStudentTransit = async ({ studentId, reason = "Arrived at College", io 
     for (const alert of activeAlerts) {
       await closeAlertById(alert.id, reason, io);
     }
-
   } catch (err) {
     console.error("[missingAlertService] endStudentTransit error:", err.message);
   }
@@ -1360,6 +1430,38 @@ const cleanupDuplicateActiveAlerts = async () => {
         },
       });
       console.log(`[missingAlertService] 🧹 Cleaned up ${duplicatesToResolve.length} stale duplicate active alerts.`);
+    }
+
+    // Also cleanup duplicate resolved notifications in DB
+    const resolvedNotifs = await prisma.notification.findMany({
+      where: { type: "missing_alert_resolved" },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const seenNotif = new Set();
+    const notifsToDelete = [];
+    for (const notif of resolvedNotifs) {
+      let parsed = {};
+      try {
+        parsed = typeof notif.data === "string" ? JSON.parse(notif.data || "{}") : (notif.data || {});
+      } catch {}
+      const missingKey = parsed.missingAlertId || parsed.alertId || parsed.id || null;
+      const targetKey = notif.userId || notif.target || "admin";
+      if (missingKey) {
+        const uniqueKey = `${missingKey}_${targetKey}`;
+        if (seenNotif.has(uniqueKey)) {
+          notifsToDelete.push(notif.id);
+        } else {
+          seenNotif.add(uniqueKey);
+        }
+      }
+    }
+
+    if (notifsToDelete.length > 0) {
+      await prisma.notification.deleteMany({
+        where: { id: { in: notifsToDelete } },
+      });
+      console.log(`[missingAlertService] 🧹 Cleaned up ${notifsToDelete.length} duplicate resolved notifications.`);
     }
   } catch (err) {
     console.error("[missingAlertService] Duplicate cleanup error:", err.message);

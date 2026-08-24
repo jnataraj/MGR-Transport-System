@@ -317,8 +317,25 @@ export function useMainDashboard({ user, token, onLogout }) {
       if (notifData.success && Array.isArray(notifData.notifications)) {
         const unread = notifData.notifications.filter((n) => !n.isRead);
         const mapped = unread.map(mapNotificationToAlert);
-        setRouteAlerts(mapped);
-        setUnreadAlerts(mapped.length);
+
+        // Deduplicate notifications by stable identifier
+        const dedupedAlerts = [];
+        const seenKeys = new Set();
+
+        for (const item of mapped) {
+          let uniqueKey = item.id;
+          if (item.notificationType === "missing_alert" || item.notificationType === "missing_alert_resolved") {
+            uniqueKey = item.missingAlertId ? `missing_${item.missingAlertId}` : (item.studentId ? `missing_student_${item.studentId}` : item.id);
+          }
+
+          if (!seenKeys.has(uniqueKey)) {
+            seenKeys.add(uniqueKey);
+            dedupedAlerts.push(item);
+          }
+        }
+
+        setRouteAlerts(dedupedAlerts);
+        setUnreadAlerts(dedupedAlerts.length);
       }
 
       const historyData = await historyRes.json().catch(() => ({}));
@@ -331,6 +348,7 @@ export function useMainDashboard({ user, token, onLogout }) {
           })),
           ...(historyData.missingAlerts || []).map((m) => ({
             id: m.id,
+            missingAlertId: m.id,
             notificationType: m.status === "RESOLVED" ? "missing_alert_resolved" : "missing_alert",
             routeName: m.status === "RESOLVED" ? "✅ Student Missing Alert Resolved" : "🚨 Student Missing Alert",
             customMessage: m.status === "RESOLVED" ? `Student ${m.studentName} resolved (${m.resolvedReason || "Rejoined"}).` : `Student ${m.studentName} is ${m.distanceMeters || "10+"}m away.`,
@@ -341,8 +359,20 @@ export function useMainDashboard({ user, token, onLogout }) {
             isRead: m.status === "RESOLVED",
           })),
         ];
-        combinedHistory.sort((a, b) => new Date(b.receivedAt || b.createdAt || 0) - new Date(a.receivedAt || a.createdAt || 0));
-        setRouteAlertHistory(combinedHistory);
+
+        // Deduplicate history by id / missingAlertId
+        const dedupedHistory = [];
+        const seenHistory = new Set();
+        for (const item of combinedHistory) {
+          const key = item.missingAlertId || item.id;
+          if (!seenHistory.has(key)) {
+            seenHistory.add(key);
+            dedupedHistory.push(item);
+          }
+        }
+
+        dedupedHistory.sort((a, b) => new Date(b.receivedAt || b.createdAt || 0) - new Date(a.receivedAt || a.createdAt || 0));
+        setRouteAlertHistory(dedupedHistory);
       }
     } catch (err) {
       console.log("Notifications fetch error:", err);
@@ -429,35 +459,46 @@ export function useMainDashboard({ user, token, onLogout }) {
 
       socketRef.current.on("new_notification", (notif) => {
         const alert = mapNotificationToAlert(notif);
-        setRouteAlerts((prev) => {
-          let parsedData = {};
-          try {
-            parsedData = typeof notif.data === "string" ? JSON.parse(notif.data || "{}") : (notif.data || {});
-          } catch {}
-          const notifStudentId = parsedData.studentId;
+        let parsedData = {};
+        try {
+          parsedData = typeof notif.data === "string" ? JSON.parse(notif.data || "{}") : (notif.data || {});
+        } catch { }
+        const missingId = parsedData.missingAlertId || parsedData.alertId || parsedData.id;
+        const notifStudentId = parsedData.studentId;
 
-          // If this is a missing alert, deduplicate by studentId or alert id
-          if (alert.notificationType === "missing_alert" || notif.type === "missing_alert") {
+        setRouteAlerts((prev) => {
+          // If this is a missing alert, deduplicate by missingAlertId, alertId, or studentId
+          if (
+            alert.notificationType === "missing_alert" ||
+            alert.notificationType === "missing_alert_resolved" ||
+            notif.type === "missing_alert" ||
+            notif.type === "missing_alert_resolved"
+          ) {
             const index = prev.findIndex(
               (p) =>
-                p.id === alert.id ||
-                p.id === parsedData.alertId ||
+                (missingId && (p.missingAlertId === missingId || p.id === missingId || p.alertId === missingId)) ||
+                (p.id === alert.id) ||
                 (notifStudentId && p.studentId === notifStudentId)
             );
             if (index !== -1) {
               const updated = [...prev];
-              updated[index] = { ...updated[index], ...alert, studentId: notifStudentId || updated[index].studentId };
+              updated[index] = {
+                ...updated[index],
+                ...alert,
+                missingAlertId: missingId || updated[index].missingAlertId,
+                studentId: notifStudentId || updated[index].studentId,
+              };
               return updated;
             }
           }
 
-          if (prev.some((a) => a.id === alert.id)) return prev;
+          if (prev.some((a) => a.id === alert.id || (missingId && a.missingAlertId === missingId))) return prev;
           setUnreadAlerts((prevCount) => prevCount + 1);
           return [alert, ...prev];
         });
 
         setRouteAlertHistory((prev) => {
-          if (prev.some((a) => a.id === alert.id)) return prev;
+          if (prev.some((a) => a.id === alert.id || (missingId && a.missingAlertId === missingId))) return prev;
           return [alert, ...prev];
         });
       });
@@ -467,9 +508,12 @@ export function useMainDashboard({ user, token, onLogout }) {
         const studentName = alert.studentName || "Student";
         const dist = alert.distanceMeters ?? "10+";
         const alertMsg = `Student: ${studentName}\nDistance: ${dist} m\nPlease check the student's location.`;
+        const alertIncidentId = alert.id;
 
         const updatedCard = {
-          id: alert.id,
+          id: alertIncidentId,
+          missingAlertId: alertIncidentId,
+          alertId: alertIncidentId,
           title: "🚨 Student Missing Alert",
           routeName: "🚨 Student Missing Alert",
           message: alertMsg,
@@ -487,7 +531,8 @@ export function useMainDashboard({ user, token, onLogout }) {
         setRouteAlerts((prev) => {
           const existingIndex = prev.findIndex(
             (p) =>
-              p.id === alert.id ||
+              p.id === alertIncidentId ||
+              p.missingAlertId === alertIncidentId ||
               (p.studentId && alert.studentId && p.studentId === alert.studentId) ||
               (p.notificationType === "missing_alert" && p.studentName === studentName && p.status !== "RESOLVED")
           );
@@ -505,7 +550,7 @@ export function useMainDashboard({ user, token, onLogout }) {
         });
 
         setRouteAlertHistory((prev) => {
-          const existingIndex = prev.findIndex((p) => p.id === alert.id);
+          const existingIndex = prev.findIndex((p) => p.id === alertIncidentId || p.missingAlertId === alertIncidentId);
           if (existingIndex !== -1) {
             const updated = [...prev];
             updated[existingIndex] = { ...updated[existingIndex], ...updatedCard };
@@ -518,16 +563,20 @@ export function useMainDashboard({ user, token, onLogout }) {
       socketRef.current.on("student_missing_alert_resolved", (res) => {
         const resolvedTitle = "✅ Student Missing Alert Resolved";
         const resolvedMsg = `Student ${res.studentName || "Student"} has rejoined the vehicle / resolved (${res.resolvedReason || "Closed"}).`;
+        const alertIncidentId = res.id || res.missingAlertId || res.alertId;
 
         setRouteAlerts((prev) => {
           const existingIdx = prev.findIndex(
-            (a) => a.id === res.id || (a.studentId && res.studentId && a.studentId === res.studentId)
+            (a) =>
+              (alertIncidentId && (a.id === alertIncidentId || a.missingAlertId === alertIncidentId || a.alertId === alertIncidentId)) ||
+              (a.studentId && res.studentId && a.studentId === res.studentId)
           );
           if (existingIdx !== -1) {
             const updated = [...prev];
             updated[existingIdx] = {
               ...updated[existingIdx],
               status: "RESOLVED",
+              missingAlertId: alertIncidentId || updated[existingIdx].missingAlertId,
               notificationType: "missing_alert_resolved",
               routeName: resolvedTitle,
               title: resolvedTitle,
@@ -538,8 +587,10 @@ export function useMainDashboard({ user, token, onLogout }) {
             };
             return updated;
           }
+
           const newResolved = {
-            id: res.id || `res-${Date.now()}`,
+            id: alertIncidentId || `res-${Date.now()}`,
+            missingAlertId: alertIncidentId,
             studentId: res.studentId,
             studentName: res.studentName,
             title: resolvedTitle,
@@ -558,13 +609,16 @@ export function useMainDashboard({ user, token, onLogout }) {
 
         setRouteAlertHistory((prev) => {
           const existingIdx = prev.findIndex(
-            (a) => a.id === res.id || (a.studentId && res.studentId && a.studentId === res.studentId)
+            (a) =>
+              (alertIncidentId && (a.id === alertIncidentId || a.missingAlertId === alertIncidentId || a.alertId === alertIncidentId)) ||
+              (a.studentId && res.studentId && a.studentId === res.studentId)
           );
           if (existingIdx !== -1) {
             const updated = [...prev];
             updated[existingIdx] = {
               ...updated[existingIdx],
               status: "RESOLVED",
+              missingAlertId: alertIncidentId || updated[existingIdx].missingAlertId,
               notificationType: "missing_alert_resolved",
               routeName: resolvedTitle,
               title: resolvedTitle,
@@ -577,7 +631,8 @@ export function useMainDashboard({ user, token, onLogout }) {
           }
           return [
             {
-              id: res.id || `res-${Date.now()}`,
+              id: alertIncidentId || `res-${Date.now()}`,
+              missingAlertId: alertIncidentId,
               routeName: resolvedTitle,
               title: resolvedTitle,
               customMessage: resolvedMsg,
@@ -681,12 +736,6 @@ export function useMainDashboard({ user, token, onLogout }) {
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
       lat = loc.coords.latitude;
       lng = loc.coords.longitude;
-      console.log(`[GPS DEBUG][DRIVER]
-latitude: ${lat}
-longitude: ${lng}
-accuracy: ${loc.coords.accuracy}
-timestamp: ${new Date(loc.timestamp).toISOString()}
-source: DriverApp-handleQRScan-STARTED`);
     } catch (locErr) {
       console.log("[GPS DEBUG][DRIVER] GPS fetch failed:", locErr.message);
     }

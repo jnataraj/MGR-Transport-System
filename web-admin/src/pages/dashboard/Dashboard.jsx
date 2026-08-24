@@ -266,16 +266,12 @@ const Dashboard = () => {
       if (alertData && alertData.success !== false) {
         setAlertBreak(alertData);
         const rawAlerts = alertData.missingAlerts || [];
-        const seenActive = new Set();
+        const seen = new Set();
         const dedupedAlerts = [];
         for (const m of rawAlerts) {
-          if (m.status === "ACTIVE") {
-            const key = `${m.studentId}_${m.vehicleId || m.vehicleNumber}`;
-            if (!seenActive.has(key)) {
-              seenActive.add(key);
-              dedupedAlerts.push(m);
-            }
-          } else {
+          const key = m.id || `${m.studentId}_${m.vehicleId || m.vehicleNumber}_${m.status}`;
+          if (!seen.has(key)) {
+            seen.add(key);
             dedupedAlerts.push(m);
           }
         }
@@ -675,16 +671,12 @@ const Dashboard = () => {
   );
 
   const renderAlertsModal = () => {
-    const seenActive = new Set();
+    const seen = new Set();
     const dedupedMissingAlerts = [];
     for (const m of missingAlerts) {
-      if (m.status === "ACTIVE") {
-        const key = `${m.studentId}_${m.vehicleId || m.vehicleNumber}`;
-        if (!seenActive.has(key)) {
-          seenActive.add(key);
-          dedupedMissingAlerts.push(m);
-        }
-      } else {
+      const key = m.id || `${m.studentId}_${m.vehicleId || m.vehicleNumber}`;
+      if (!seen.has(key)) {
+        seen.add(key);
         dedupedMissingAlerts.push(m);
       }
     }

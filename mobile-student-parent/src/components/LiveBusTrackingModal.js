@@ -16,29 +16,19 @@ import {
   ExternalLink,
   RefreshCw,
   MapPin,
-  Navigation,
-  Compass,
   AlertTriangle,
 } from "lucide-react-native";
-import * as Location from "expo-location";
 import { API_BASE } from "../api/client";
 
 // Safely resolve react-native-maps without native crashes
 let MapView = null;
 let Marker = null;
-let PROVIDER_GOOGLE = undefined;
 
 if (Platform.OS !== "web") {
   try {
     const Maps = require("react-native-maps");
     MapView = Maps.default || Maps;
     Marker = Maps.Marker || (Maps.default && Maps.default.Marker);
-    // Only pass PROVIDER_GOOGLE on Android if available.
-    // NEVER pass PROVIDER_GOOGLE on iOS unless Google Maps iOS Pod is explicitly linked,
-    // otherwise iOS throws SIGABRT and terminates the app.
-    if (Platform.OS === "android") {
-      PROVIDER_GOOGLE = Maps.PROVIDER_GOOGLE || (Maps.default && Maps.default.PROVIDER_GOOGLE);
-    }
   } catch (err) {
     console.warn("[LiveBusTrackingModal] react-native-maps not available:", err);
   }
@@ -47,36 +37,32 @@ if (Platform.OS !== "web") {
 /** How long (ms) without a GPS ping before we show the bus as offline */
 const OFFLINE_THRESHOLD_MS = 60_000;
 
-// Campus / fallback coordinates (Chennai / MGR University)
+// Campus / fallback coordinates (Chennai / MGR University) for safe initial map camera
 const DEFAULT_COORDS = {
   latitude: 13.0382,
   longitude: 80.1780,
 };
 
-// Safe coordinate parser
+// Safe coordinate parser (returns valid finite number or null)
 const parseCoord = (val) => {
-  if (val === null || val === undefined) return null;
+  if (val === null || val === undefined || val === "") return null;
   const num = typeof val === "number" ? val : parseFloat(val);
   return Number.isFinite(num) ? num : null;
 };
 
-// Calculate distance in km
-function calculateDistanceKm(lat1, lon1, lat2, lon2) {
-  if (!lat1 || !lon1 || !lat2 || !lon2) return null;
-  const R = 6371; // Earth's radius in km
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-    Math.cos((lat2 * Math.PI) / 180) *
-    Math.sin(dLon / 2) *
-    Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return (R * c).toFixed(1);
-}
+// Helper to safely extract clean string ID or identifier
+const getCleanString = (val) => {
+  if (!val) return null;
+  if (typeof val === "string") return val.trim();
+  if (typeof val === "number") return String(val).trim();
+  if (typeof val === "object") {
+    if (val.id) return String(val.id).trim();
+    if (val.number) return String(val.number).trim();
+  }
+  return null;
+};
 
-// Error Boundary to prevent any native map crash from closing the app
+// Error Boundary to prevent any native map crash from terminating the Android / iOS app
 class MapErrorBoundary extends Component {
   constructor(props) {
     super(props);
@@ -93,15 +79,14 @@ class MapErrorBoundary extends Component {
 
   render() {
     if (this.state.hasError) {
-      return this.props.fallback ? (
-        this.props.fallback(this.state.error, () =>
-          this.setState({ hasError: false, error: null })
-        )
-      ) : (
+      if (typeof this.props.fallback === "function") {
+        return this.props.fallback(this.state.error);
+      }
+      return (
         <View style={styles.centreBox}>
           <Text style={{ fontSize: 42, marginBottom: 12 }}>🗺️</Text>
-          <Text style={styles.errorTitle}>Map Display Fallback</Text>
-          <Text style={styles.errorBody}>
+          <Text style={styles.offlineTitle}>Map Display Fallback</Text>
+          <Text style={styles.offlineBody}>
             Interactive map view is unavailable. You can still track your bus and open live directions below.
           </Text>
         </View>
@@ -123,97 +108,81 @@ export default function LiveBusTrackingModal({
   const [loading, setLoading] = useState(false);
   const [busOnline, setBusOnline] = useState(false);
   const [busLocation, setBusLocation] = useState(null); // { latitude, longitude, updatedAt }
-  const [myLocation, setMyLocation] = useState(null);   // student's own GPS
   const [error, setError] = useState(null);
   const [driverActive, setDriverActive] = useState(null);
   const [driverOnDuty, setDriverOnDuty] = useState(false);
-  const [driverName, setDriverName] = useState(user?.driverName || null);
-  const [nativeMapFailed, setNativeMapFailed] = useState(false);
 
   const mapRef = useRef(null);
   const mapReadyRef = useRef(false);
   const offlineTimerRef = useRef(null);
 
-  // Resolve assigned vehicle & route reliably from user or parent's child profile
-  const assignedVehicleId =
-    user?.vehicleId || user?.vehicle || user?.assignedVehicle || user?.busNumber || null;
-  const vehicleNumber = user?.vehicle || user?.vehicleId || assignedVehicleId || "Bus";
-  const routeLabel = user?.route || "Standard Route";
+  // ── Resolve assigned vehicle & route reliably from existing user data ──
+  const assignedVehicleId = getCleanString(
+    user?.vehicleId ||
+    (typeof user?.assignedVehicle === "object" ? user?.assignedVehicle?.id : user?.assignedVehicle) ||
+    user?.vehicle ||
+    user?.busNumber
+  );
+
+  const vehicleNumber =
+    (typeof user?.assignedVehicle === "object" ? user?.assignedVehicle?.number : null) ||
+    user?.busNumber ||
+    (typeof user?.vehicle === "string" ? user?.vehicle : null) ||
+    assignedVehicleId ||
+    "Bus";
+
+  const routeLabel =
+    user?.route ||
+    (typeof user?.assignedVehicle === "object" ? user?.assignedVehicle?.route : null) ||
+    user?.routeNumber ||
+    "Standard Route";
 
   const authHeaders = {
     "Content-Type": "application/json",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 
-  // ── Fetch initial snapshot from REST ──────────────────────────────────────
-  const fetchInitialLocation = useCallback(async () => {
-    if (!assignedVehicleId) {
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(
-        `${API_BASE}/api/attendance/bus-location?vehicleId=${encodeURIComponent(
-          assignedVehicleId
-        )}`,
-        { headers: authHeaders }
-      );
-      const data = await res.json();
-      if (data.success) {
-        setBusOnline(!!data.online);
-        setDriverActive(data.driverActive ?? true);
-        setDriverOnDuty(!!data.driverOnDuty);
+  // Helper to verify if an incoming socket event belongs ONLY to the student's assigned bus
+  const isMatchingVehicle = useCallback((data) => {
+    if (!data || !assignedVehicleId) return false;
 
-        if (data.location) {
-          const lat = parseCoord(data.location.latitude);
-          const lng = parseCoord(data.location.longitude);
-          if (lat !== null && lng !== null) {
-            const locObj = {
-              latitude: lat,
-              longitude: lng,
-              updatedAt: new Date(data.location.updatedAt || Date.now()),
-            };
-            setBusLocation(locObj);
-            if (mapReadyRef.current && mapRef.current?.animateToRegion) {
-              animateToBus(locObj);
-            }
-          }
-        }
-      } else {
-        // Vehicle might not have active live GPS yet
-        setBusOnline(false);
+    const validTargets = new Set();
+    const addTarget = (v) => {
+      if (v != null && typeof v !== "object") {
+        const s = String(v).trim().toLowerCase();
+        if (s) validTargets.add(s);
       }
-    } catch (err) {
-      console.log("[LiveBusTrackingModal] fetch error:", err.message);
-      setError("Could not reach transport server. Check connection.");
-    } finally {
-      setLoading(false);
-    }
-  }, [assignedVehicleId, token]);
+    };
 
-  // ── Get student's own GPS for "my location" dot ───────────────────────────
-  const fetchMyLocation = useCallback(async () => {
-    try {
-      const { status } = await Location.getForegroundPermissionsAsync();
-      if (status === "granted") {
-        const loc = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
-        if (loc?.coords) {
-          const lat = parseCoord(loc.coords.latitude);
-          const lng = parseCoord(loc.coords.longitude);
-          if (lat !== null && lng !== null) {
-            setMyLocation({ latitude: lat, longitude: lng });
-          }
-        }
+    addTarget(assignedVehicleId);
+    addTarget(vehicleNumber);
+    if (user?.vehicleId) addTarget(user.vehicleId);
+    if (user?.vehicle) addTarget(user.vehicle);
+    if (user?.busNumber) addTarget(user.busNumber);
+    if (typeof user?.assignedVehicle === "object") {
+      addTarget(user.assignedVehicle?.id);
+      addTarget(user.assignedVehicle?.number);
+    } else if (user?.assignedVehicle) {
+      addTarget(user.assignedVehicle);
+    }
+
+    const incomingTargets = [
+      data.vehicleId,
+      data.vehicleNumber,
+      data.id,
+      data.vehicle_id,
+    ];
+
+    return incomingTargets.some((inc) => {
+      if (inc != null && typeof inc !== "object") {
+        const s = String(inc).trim().toLowerCase();
+        return validTargets.has(s);
       }
-    } catch {
-      // GPS permission denied or disabled — no student dot shown
-    }
-  }, []);
+      return false;
+    });
+  }, [assignedVehicleId, vehicleNumber, user]);
 
-  // ── Auto-animate map to bus position ──────────────────────────────────────
+  // ── Auto-animate map safely to bus position ──────────────────────────────
   const animateToBus = useCallback((coords) => {
     if (mapRef.current && coords && Platform.OS !== "web" && mapReadyRef.current) {
       const lat = parseCoord(coords.latitude);
@@ -244,6 +213,62 @@ export default function LiveBusTrackingModal({
     }, OFFLINE_THRESHOLD_MS);
   }, []);
 
+  // ── Fetch initial snapshot from REST using ONLY assigned vehicle ID ───────
+  const fetchInitialLocation = useCallback(async () => {
+    if (!assignedVehicleId) {
+      setLoading(false);
+      setBusLocation(null);
+      setBusOnline(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/attendance/bus-location?vehicleId=${encodeURIComponent(
+          assignedVehicleId
+        )}`,
+        { headers: authHeaders }
+      );
+      const data = await res.json();
+      if (data.success) {
+        setBusOnline(!!data.online);
+        setDriverActive(data.driverActive ?? true);
+        setDriverOnDuty(!!data.driverOnDuty);
+
+        if (data.location) {
+          const lat = parseCoord(data.location.latitude ?? data.location.lat);
+          const lng = parseCoord(data.location.longitude ?? data.location.lng);
+          if (lat !== null && lng !== null) {
+            const locObj = {
+              latitude: lat,
+              longitude: lng,
+              updatedAt: new Date(data.location.updatedAt || Date.now()),
+            };
+            setBusLocation(locObj);
+            if (mapReadyRef.current && mapRef.current?.animateToRegion) {
+              animateToBus(locObj);
+            }
+          } else {
+            setBusLocation(null);
+          }
+        } else {
+          setBusLocation(null);
+        }
+      } else {
+        setBusOnline(false);
+        setBusLocation(null);
+      }
+    } catch (err) {
+      console.log("[LiveBusTrackingModal] fetch error:", err.message);
+      setError("Could not reach transport server. Check connection.");
+      setBusLocation(null);
+      setBusOnline(false);
+    } finally {
+      setLoading(false);
+    }
+  }, [assignedVehicleId, token, animateToBus]);
+
   // ── Effect: initialise on modal open ─────────────────────────────────────
   useEffect(() => {
     if (!visible) {
@@ -251,36 +276,30 @@ export default function LiveBusTrackingModal({
       return;
     }
     setBusLocation(null);
-    setMyLocation(null);
     setBusOnline(false);
     setError(null);
     setDriverActive(null);
     setDriverOnDuty(false);
-    setNativeMapFailed(false);
-    if (user?.driverName) setDriverName(user.driverName);
 
     fetchInitialLocation();
-    fetchMyLocation();
 
     return () => {
       if (offlineTimerRef.current) clearTimeout(offlineTimerRef.current);
       mapReadyRef.current = false;
     };
-  }, [visible, user]);
+  }, [visible, user, fetchInitialLocation]);
 
-  // ── Effect: socket listeners ───────────────────────────────────────────────
+  // ── Effect: socket listeners (filtered strictly for assigned bus) ───────────
   useEffect(() => {
     if (!visible || !socketRef?.current) return;
     const socket = socketRef.current;
 
     const handleLocationUpdate = (data) => {
-      if (!data || !data.vehicleId) return;
-      const isMyBus =
-        String(data.vehicleId).trim() === String(assignedVehicleId).trim() ||
-        String(data.vehicleId).trim() === String(vehicleNumber).trim() ||
-        String(data.vehicleNumber || "").trim() === String(vehicleNumber).trim();
-
-      if (!isMyBus) return;
+      if (!data) return;
+      if (!isMatchingVehicle(data)) {
+        // Ignore socket events belonging to any other vehicle
+        return;
+      }
 
       const lat = parseCoord(data.latitude ?? data.lat);
       const lng = parseCoord(data.longitude ?? data.lng);
@@ -290,7 +309,7 @@ export default function LiveBusTrackingModal({
       const newCoords = {
         latitude: lat,
         longitude: lng,
-        updatedAt: new Date(),
+        updatedAt: new Date(data.timestamp || Date.now()),
       };
       setBusLocation(newCoords);
       setBusOnline(true);
@@ -299,11 +318,8 @@ export default function LiveBusTrackingModal({
     };
 
     const handleLocationStopped = (data) => {
-      if (!data || !data.vehicleId) return;
-      const isMyBus =
-        String(data.vehicleId).trim() === String(assignedVehicleId).trim() ||
-        String(data.vehicleId).trim() === String(vehicleNumber).trim();
-      if (!isMyBus) return;
+      if (!data) return;
+      if (!isMatchingVehicle(data)) return;
       setBusOnline(false);
       if (offlineTimerRef.current) clearTimeout(offlineTimerRef.current);
     };
@@ -315,7 +331,7 @@ export default function LiveBusTrackingModal({
       socket.off("busLocationChanged", handleLocationUpdate);
       socket.off("busLocationStopped", handleLocationStopped);
     };
-  }, [visible, socketRef, assignedVehicleId, vehicleNumber, animateToBus, resetOfflineTimer]);
+  }, [visible, socketRef, isMatchingVehicle, animateToBus, resetOfflineTimer]);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   const formatTime = (date) => {
@@ -323,6 +339,11 @@ export default function LiveBusTrackingModal({
     const d = date instanceof Date ? date : new Date(date);
     return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true });
   };
+
+  const isAssigned = !!assignedVehicleId;
+  const busLat = parseCoord(busLocation?.latitude);
+  const busLng = parseCoord(busLocation?.longitude);
+  const hasValidBusCoords = busLat !== null && busLng !== null;
 
   const openInGoogleMaps = () => {
     const targetLat = busLat || DEFAULT_COORDS.latitude;
@@ -340,30 +361,15 @@ export default function LiveBusTrackingModal({
 
   if (userRole === "hod") return null;
 
-  const isAssigned = !!assignedVehicleId;
-  const busLat = parseCoord(busLocation?.latitude);
-  const busLng = parseCoord(busLocation?.longitude);
-  const hasValidBusCoords = busLat !== null && busLng !== null;
-
-  // Region is always safely initialized with valid coordinates
+  // Safe camera region: never passes NaN or null into native maps
   const activeRegion = {
-    latitude: busLat || parseCoord(myLocation?.latitude) || DEFAULT_COORDS.latitude,
-    longitude: busLng || parseCoord(myLocation?.longitude) || DEFAULT_COORDS.longitude,
+    latitude: hasValidBusCoords ? busLat : DEFAULT_COORDS.latitude,
+    longitude: hasValidBusCoords ? busLng : DEFAULT_COORDS.longitude,
     latitudeDelta: 0.015,
     longitudeDelta: 0.015,
   };
 
-  const distanceKm =
-    hasValidBusCoords && myLocation
-      ? calculateDistanceKm(
-        myLocation.latitude,
-        myLocation.longitude,
-        busLocation.latitude,
-        busLocation.longitude
-      )
-      : null;
-
-  // ── Native map error fallback ─────────────────────────────────────────────
+  // ── Native map error fallback card ─────────────────────────────────────────
   const renderFallbackCard = () => (
     <View style={styles.webFallback}>
       <View style={styles.mapIconCircle}>
@@ -407,15 +413,6 @@ export default function LiveBusTrackingModal({
               {busLat.toFixed(4)}, {busLng.toFixed(4)}
             </Text>
           </View>
-          {distanceKm && (
-            <View style={[styles.coordRow, { marginTop: 8 }]}>
-              <Navigation size={18} color="#10B981" />
-              <Text style={styles.coordLabel}>Est. Distance:</Text>
-              <Text style={[styles.coordValue, { color: "#10B981" }]}>
-                ~{distanceKm} km away
-              </Text>
-            </View>
-          )}
         </View>
       ) : (
         <View style={styles.noticeBox}>
@@ -562,22 +559,16 @@ export default function LiveBusTrackingModal({
               </View>
             </View>
           </View>
-        ) : !MapView || !Marker || nativeMapFailed ? (
-          /* Fallback view when native maps is unavailable or crashed */
+        ) : !MapView || !Marker ? (
+          /* Fallback view when native maps module is not installed */
           renderFallbackCard()
         ) : (
-          /* Native Interactive MapView (iOS & Android) */
-          <MapErrorBoundary
-            fallback={() => {
-              setNativeMapFailed(true);
-              return renderFallbackCard();
-            }}
-          >
+          /* Native Interactive MapView (Safe default provider on iOS & Android) */
+          <MapErrorBoundary fallback={() => renderFallbackCard()}>
             <View style={{ flex: 1 }}>
               <MapView
                 ref={mapRef}
                 style={styles.map}
-                provider={PROVIDER_GOOGLE}
                 initialRegion={activeRegion}
                 showsUserLocation={false}
                 showsMyLocationButton={false}
@@ -585,10 +576,12 @@ export default function LiveBusTrackingModal({
                 showsScale
                 onMapReady={() => {
                   mapReadyRef.current = true;
-                  if (busLocation) animateToBus(busLocation);
+                  if (hasValidBusCoords && busLocation) {
+                    animateToBus(busLocation);
+                  }
                 }}
               >
-                {/* Bus Marker */}
+                {/* Driver/Bus Live Marker ONLY */}
                 {hasValidBusCoords && (
                   <Marker
                     coordinate={{
@@ -604,25 +597,6 @@ export default function LiveBusTrackingModal({
                     </View>
                   </Marker>
                 )}
-
-                {/* Student's Own Location Marker */}
-                {myLocation &&
-                  parseCoord(myLocation.latitude) !== null &&
-                  parseCoord(myLocation.longitude) !== null && (
-                    <Marker
-                      coordinate={{
-                        latitude: parseCoord(myLocation.latitude),
-                        longitude: parseCoord(myLocation.longitude),
-                      }}
-                      title="Your Location"
-                      description="You are here"
-                      anchor={{ x: 0.5, y: 0.5 }}
-                    >
-                      <View style={styles.myMarker}>
-                        <View style={styles.myMarkerDot} />
-                      </View>
-                    </Marker>
-                  )}
               </MapView>
 
               {/* Top Warning Banner if Bus is Offline */}
@@ -646,25 +620,6 @@ export default function LiveBusTrackingModal({
                     accessibilityLabel="Center on bus"
                   >
                     <Bus size={20} color="#2563EB" strokeWidth={2.2} />
-                  </TouchableOpacity>
-                )}
-
-                {myLocation && (
-                  <TouchableOpacity
-                    style={styles.floatingBtn}
-                    onPress={() => {
-                      if (mapRef.current && mapReadyRef.current) {
-                        mapRef.current.animateToRegion({
-                          latitude: myLocation.latitude,
-                          longitude: myLocation.longitude,
-                          latitudeDelta: 0.01,
-                          longitudeDelta: 0.01,
-                        });
-                      }
-                    }}
-                    accessibilityLabel="Center on my location"
-                  >
-                    <Compass size={20} color="#10B981" strokeWidth={2.2} />
                   </TouchableOpacity>
                 )}
 
@@ -714,21 +669,12 @@ export default function LiveBusTrackingModal({
                     </View>
                   </View>
 
-                  {distanceKm ? (
-                    <View style={styles.infoCol}>
-                      <Text style={styles.infoLabel}>DISTANCE</Text>
-                      <Text style={[styles.infoValue, { color: "#2563EB" }]}>
-                        {distanceKm} km
-                      </Text>
-                    </View>
-                  ) : (
-                    <View style={styles.infoCol}>
-                      <Text style={styles.infoLabel}>UPDATED</Text>
-                      <Text style={styles.infoValue}>
-                        {busLocation ? formatTime(busLocation.updatedAt) : "—"}
-                      </Text>
-                    </View>
-                  )}
+                  <View style={styles.infoCol}>
+                    <Text style={styles.infoLabel}>UPDATED</Text>
+                    <Text style={styles.infoValue}>
+                      {busLocation ? formatTime(busLocation.updatedAt) : "—"}
+                    </Text>
+                  </View>
                 </View>
               </View>
             </View>
@@ -859,22 +805,6 @@ const styles = StyleSheet.create({
   },
   busMarkerEmoji: {
     fontSize: 20,
-  },
-  myMarker: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: "rgba(37,99,235,0.25)",
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 2,
-    borderColor: "#2563EB",
-  },
-  myMarkerDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: "#2563EB",
   },
 
   // Top banner
