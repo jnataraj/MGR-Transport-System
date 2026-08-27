@@ -296,8 +296,8 @@ distanceMeters: ${Math.round(distanceMeters)}`);
           const reason = normStage.includes("COLLEGE")
             ? "Arrived at College"
             : normStage.includes("HOME") || normStage.includes("DROP")
-            ? "Arrived at Home"
-            : "Attendance Closed";
+              ? "Arrived at Home"
+              : "Attendance Closed";
           await endStudentTransit({
             studentId: user.id,
             reason,
@@ -782,19 +782,31 @@ exports.getBusLiveLocation = async (req, res) => {
  */
 exports.getDepartmentAttendanceSummary = async (req, res) => {
   try {
-    const { department } = req.query;
+    const { department, year } = req.query;
     if (!department) {
       return res.status(400).json({ success: false, message: "department is required" });
+    }
+
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: "Authentication required" });
     }
 
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
 
     // ── Resolve student filter ──────────────────────────────────────────────
-    const studentFilter =
-      department === "ALL"
-        ? { role: "student" }
-        : { role: "student", department };
+    // department=ALL is allowed for any authenticated user (e.g. HoD overview).
+    // Optionally filter by academic year within the department.
+    let studentFilter;
+    if (department === "ALL") {
+      studentFilter = { role: "student" };
+    } else {
+      studentFilter = { role: "student", department };
+    }
+    // Narrow by academic year if provided
+    if (year && year !== "ALL") {
+      studentFilter.year = year;
+    }
 
     const students = await prisma.user.findMany({
       where: studentFilter,
@@ -802,7 +814,7 @@ exports.getDepartmentAttendanceSummary = async (req, res) => {
         id: true, name: true, rollNumber: true, year: true, department: true,
         studentAssignments: { include: { vehicle: true } },
       },
-      orderBy: [{ department: "asc" }, { name: "asc" }],
+      orderBy: [{ department: "asc" }, { year: "asc" }, { name: "asc" }],
     });
 
     const studentIds = students.map((s) => s.id);

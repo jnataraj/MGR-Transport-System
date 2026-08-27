@@ -30,6 +30,12 @@ export const fetchUsers = async (role) => {
   return handleResponse(response);
 };
 
+// Returns unique, eligible departments derived from students with bus assignments
+export const fetchHoDDepartments = async () => {
+  const response = await fetch(`${API_BASE}/users/departments`);
+  return handleResponse(response);
+};
+
 export const createUser = async (data) => {
   const response = await fetch(`${API_BASE}/users`, {
     method: "POST",
@@ -409,6 +415,7 @@ export const createRouteAlert = async (data) => {
 export default {
   socket,
   fetchUsers,
+  fetchHoDDepartments,
   createUser,
   updateUser,
   deleteUser,

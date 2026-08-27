@@ -57,8 +57,17 @@ export function AuthProvider({ children }) {
       }
     } catch (err) {
       console.error("Failed to refresh profile:", err);
+
+      // If the server says the user no longer exists (deleted account / DB reset)
+      // or the token is invalid/expired, clear local auth so the user lands on
+      // the login screen instead of being stuck in a broken authenticated state.
+      if (err.status === 404 || err.status === 401) {
+        console.warn("Stale session detected — clearing auth and logging out.");
+        await clearAuth();
+        setToken(null);
+        setUser(null);
+      }
     }
-    console.log("Refresh Token:", token);
     return null;
   }, [token]);
 

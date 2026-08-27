@@ -94,7 +94,7 @@ function StudentRow({ student, showDept }) {
   );
 }
 
-export default function AbsentStudentsModal({ visible, summary, deptBreakdown, onClose }) {
+export default function AbsentStudentsModal({ visible, summary, deptBreakdown, department, onClose }) {
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState("absent"); // "absent" | "all" | "present"
   const [selectedDept, setSelectedDept] = useState("ALL");
@@ -139,7 +139,7 @@ export default function AbsentStudentsModal({ visible, summary, deptBreakdown, o
         <View style={[styles.header, { backgroundColor: "#7C3AED" }]}>
           <View>
             <Text style={{ color: "rgba(255,255,255,0.7)", fontSize: 9, fontWeight: "800", letterSpacing: 1 }}>
-              ALL DEPARTMENTS
+              {department ? department.toUpperCase() : "MY DEPARTMENT"}
             </Text>
             <Text style={styles.headerTitle}>Today's Attendance Details</Text>
           </View>

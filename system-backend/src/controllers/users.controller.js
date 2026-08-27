@@ -253,6 +253,47 @@ const assignStudentToVehicle = async (studentId, rawVehicleIds = [], studentName
   }
 };
 
+// ── GET /api/users/departments ─────────────────────────────────────────────
+// Returns unique, non-empty departments that are assigned to at least one
+// student who has a VehicleStudentAssignment (i.e. assigned to a bus).
+const getDepartments = async (req, res) => {
+  try {
+    const students = await prisma.user.findMany({
+      where: {
+        role: { equals: "student", mode: "insensitive" },
+        department: { not: null },
+        studentAssignments: { some: {} }, // must have at least one bus assignment
+      },
+      select: { department: true },
+      distinct: ["department"],
+      orderBy: { department: "asc" },
+    });
+
+    const departments = students
+      .map((s) => s.department)
+      .filter(Boolean);
+
+    res.json({ departments });
+  } catch (err) {
+    console.error("getDepartments error:", err);
+    res.status(500).json({ error: "Failed to fetch departments" });
+  }
+};
+
+// ── Helper: resolve eligible departments (used for HoD validation) ──────────
+const getEligibleDepartments = async () => {
+  const students = await prisma.user.findMany({
+    where: {
+      role: { equals: "student", mode: "insensitive" },
+      department: { not: null },
+      studentAssignments: { some: {} },
+    },
+    select: { department: true },
+    distinct: ["department"],
+  });
+  return students.map((s) => s.department).filter(Boolean);
+};
+
 const getUsers = async (req, res) => {
   try {
     const { role } = req.query;
@@ -396,6 +437,19 @@ const createUser = async (req, res) => {
       return res.status(400).json({ error: "Password is required" });
     }
 
+    // ── HoD department validation ──────────────────────────────────────────
+    if (data.role?.toLowerCase() === "hod") {
+      if (!data.department || data.department.trim() === "") {
+        return res.status(400).json({ error: "Department is required for HoD" });
+      }
+      const eligible = await getEligibleDepartments();
+      if (eligible.length > 0 && !eligible.includes(data.department.trim())) {
+        return res.status(400).json({
+          error: `Department "${data.department}" has no assigned students. Please select a valid department.`,
+        });
+      }
+    }
+
     const vehicleIds = (Array.isArray(data.vehicleIds) && data.vehicleIds.length > 0)
       ? data.vehicleIds
       : (data.vehicle ? [data.vehicle] : (Array.isArray(data.vehicleIds) ? data.vehicleIds : []));
@@ -442,6 +496,20 @@ const updateUser = async (req, res) => {
   try {
     const { id } = req.params;
     const data = req.body;
+
+    // ── HoD department validation ──────────────────────────────────────────
+    if (data.role?.toLowerCase() === "hod" && data.department !== undefined) {
+      if (data.department.trim() === "") {
+        return res.status(400).json({ error: "Department is required for HoD" });
+      }
+      const eligible = await getEligibleDepartments();
+      if (eligible.length > 0 && !eligible.includes(data.department.trim())) {
+        return res.status(400).json({
+          error: `Department "${data.department}" has no assigned students. Please select a valid department.`,
+        });
+      }
+    }
+
     const vehicleIds = (Array.isArray(data.vehicleIds) && data.vehicleIds.length > 0)
       ? data.vehicleIds
       : (data.vehicle ? [data.vehicle] : (Array.isArray(data.vehicleIds) ? data.vehicleIds : []));
@@ -522,6 +590,7 @@ const deleteUser = async (req, res) => {
 };
 
 module.exports = {
+  getDepartments,
   getUsers,
   getUser,
   createUser,

@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const attendanceController = require("../controllers/attendance.controller");
+const { verifyToken } = require("../middleware/auth.middleware");
 
 // GET /api/attendance/current - Get today's latest stage for a user (MUST be before "/")
 router.get("/driver-status", attendanceController.getDriverStatus);
@@ -32,7 +33,7 @@ router.post("/", attendanceController.recordAttendance);
 // GET /api/attendance - Fetch attendance records
 router.get("/", attendanceController.getAttendanceHistory);
 
-router.get("/department-summary", attendanceController.getDepartmentAttendanceSummary);
-router.get("/department-history", attendanceController.getDepartmentAttendanceHistory);
+router.get("/department-summary", verifyToken, attendanceController.getDepartmentAttendanceSummary);
+router.get("/department-history", verifyToken, attendanceController.getDepartmentAttendanceHistory);
 
 module.exports = router;

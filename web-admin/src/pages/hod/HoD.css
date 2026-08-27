@@ -99,16 +99,20 @@
 .hod-modal-body::-webkit-scrollbar {
   width: 6px;
 }
+
 .hod-modal-body::-webkit-scrollbar-track {
   background: transparent;
 }
+
 .hod-modal-body::-webkit-scrollbar-thumb {
   background-color: #c4b5fd;
   border-radius: 999px;
 }
+
 .hod-modal-body::-webkit-scrollbar-thumb:hover {
   background-color: var(--hod-accent);
 }
+
 /* Firefox */
 .hod-modal-body {
   scrollbar-width: thin;
@@ -167,7 +171,8 @@
 .hod-field {
   flex: 1;
   margin-bottom: 1rem;
-  min-width: 0; /* prevents flex items from overflowing their container */
+  min-width: 0;
+  /* prevents flex items from overflowing their container */
 }
 
 .hod-form-row .hod-field {
@@ -234,6 +239,74 @@
 
 .hod-field input[type="file"]:hover {
   border-color: var(--hod-accent);
+}
+
+/* ---------- Department select dropdown ---------- */
+.hod-dept-select {
+  /* Override browser native appearance so we can show a custom arrow */
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  padding-right: 36px;
+  /* room for the arrow */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  cursor: pointer;
+}
+
+/* .hod-dept-select:focus {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%237c3aed' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+} */
+/* HoD.css */
+.hod-dept-select,
+.hod-dept-select:focus,
+.hod-dept-select:focus-visible {
+  outline: none !important;
+  outline-offset: 0;
+}
+
+/* Placeholder / disabled option styling */
+.hod-dept-select option[disabled] {
+  color: #9ca3af;
+}
+
+/* Loading skeleton state */
+.hod-dept-loading {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1.5px solid var(--hod-border);
+  background: #f9fafb;
+  font-size: 0.95rem;
+  color: #9ca3af;
+  font-style: italic;
+  animation: hod-dept-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes hod-dept-pulse {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Error state */
+.hod-dept-error {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1.5px solid #fca5a5;
+  background: #fff1f1;
+  font-size: 0.875rem;
+  color: #dc2626;
 }
 
 /* ---------- Buttons ---------- */
@@ -403,6 +476,7 @@
     opacity: 0;
     transform: translateY(4px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);

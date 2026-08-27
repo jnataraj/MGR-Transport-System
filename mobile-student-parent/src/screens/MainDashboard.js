@@ -11,6 +11,7 @@ import {
   Modal,
   SafeAreaView,
   ScrollView,
+  TextInput,
   Platform,
 } from "react-native";
 import * as Location from "expo-location";
@@ -489,6 +490,9 @@ export default function MainDashboard({ user, token, onLogout }) {
   const [deptHistory, setDeptHistory] = useState({
     dayWise: [], avgAttendanceRate: "0.0%", totalAbsent: 0, daysTracked: 0,
   });
+  // Department attendance filters for "Today's Absent on Bus" and "Overview"
+  const [hodYearFilter, setHodYearFilter] = useState("ALL");
+  const [hodAbsentSearch, setHodAbsentSearch] = useState("");
 
   const fetchDeptSummary = async () => {
     if (!userDept) return;
@@ -787,7 +791,7 @@ source: StudentApp-handleScanQR`);
   const socketRef = useRef(null);
   const [routeAlerts, setRouteAlerts] = useState([]);
   const [showRouteAlertsModal, setShowRouteAlertsModal] = useState(false);
-  const [unreadAlerts, setUnreadAlerts] = useState(2);
+  const [unreadAlerts, setUnreadAlerts] = useState(0);
 
   React.useEffect(() => {
     (async () => {
@@ -855,7 +859,7 @@ source: StudentApp-handleScanQR`);
           let parsedData = {};
           try {
             parsedData = typeof notif.data === "string" ? JSON.parse(notif.data || "{}") : (notif.data || {});
-          } catch {}
+          } catch { }
           const notifStudentId = parsedData.studentId;
 
           // If this is a missing alert, deduplicate by studentId or alert id
@@ -928,12 +932,12 @@ source: StudentApp-handleScanQR`);
             prev.map((a) =>
               a.id === res.id || (a.studentId && res.studentId && a.studentId === res.studentId)
                 ? {
-                    ...a,
-                    status: "RESOLVED",
-                    message: `✅ ${a.studentName || "Student"} — Resolved (${res.resolvedReason || "Closed"}).`,
-                    resolvedReason: res.resolvedReason,
-                    resolvedAt: res.resolvedAt,
-                  }
+                  ...a,
+                  status: "RESOLVED",
+                  message: `✅ ${a.studentName || "Student"} — Resolved (${res.resolvedReason || "Closed"}).`,
+                  resolvedReason: res.resolvedReason,
+                  resolvedAt: res.resolvedAt,
+                }
                 : a
             )
           );
@@ -1184,6 +1188,228 @@ source: StudentApp-handleScanQR`);
                 <Text style={[styles.hodStatNum, { color: "#7C3AED" }]}>{deptSummary.totalStudents}</Text>
                 <Text style={styles.hodStatLabel}>Total Dept</Text>
               </View>
+            </View>
+          )}
+
+          {/* ── TODAY'S ABSENT ON BUS ─────────────────────────────────────── */}
+          {isHoD && (
+            <View style={{
+              backgroundColor: "#FFF", borderRadius: 16, padding: 16,
+              marginHorizontal: 16, marginBottom: 12, elevation: 2,
+              shadowColor: "#000", shadowOffset: { width: 0, height: 1 },
+              shadowOpacity: 0.06, shadowRadius: 4,
+            }}>
+              {/* Header */}
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+                <View>
+                  <Text style={{ fontSize: 13, fontWeight: "900", color: "#1E293B" }}>🚍 Today's Absent on Bus</Text>
+                  <Text style={{ fontSize: 10, color: "#94A3B8", fontWeight: "600", marginTop: 2 }}>
+                    {new Date().toLocaleDateString("en-GB", { weekday: "short", day: "2-digit", month: "short", year: "numeric" })}
+                  </Text>
+                </View>
+                {(deptSummary.absentCount > 0) && (
+                  <View style={{ backgroundColor: "#FEE2E2", borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: "#FECACA" }}>
+                    <Text style={{ fontSize: 10, fontWeight: "900", color: "#DC2626" }}>{deptSummary.absentCount} ABSENT</Text>
+                  </View>
+                )}
+              </View>
+
+              {/* No department guard */}
+              {!userDept ? (
+                <View style={{ alignItems: "center", paddingVertical: 20 }}>
+                  <Text style={{ fontSize: 28, marginBottom: 8 }}>🏢</Text>
+                  <Text style={{ fontSize: 13, fontWeight: "700", color: "#64748B" }}>No department assigned</Text>
+                  <Text style={{ fontSize: 11, color: "#94A3B8", textAlign: "center", marginTop: 4 }}>
+                    Ask your administrator to assign a department to your account.
+                  </Text>
+                </View>
+              ) : (
+                <>
+                  {/* Search box */}
+                  <TextInput
+                    value={hodAbsentSearch}
+                    onChangeText={setHodAbsentSearch}
+                    placeholder="Search student name or roll..."
+                    placeholderTextColor="#94A3B8"
+                    style={{
+                      backgroundColor: "#F8FAFC", borderRadius: 10, paddingHorizontal: 12,
+                      paddingVertical: 9, fontSize: 12, color: "#1E293B",
+                      borderWidth: 1, borderColor: "#E2E8F0", marginBottom: 10,
+                    }}
+                  />
+
+                  {/* Year tabs */}
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}
+                    contentContainerStyle={{ gap: 6, paddingRight: 4 }}>
+                    {[
+                      { key: "ALL", label: "ALL BATCHES" },
+                      { key: "1st Year", label: "1ST YEAR" },
+                      { key: "2nd Year", label: "2ND YEAR" },
+                      { key: "3rd Year", label: "3RD YEAR" },
+                      { key: "4th Year", label: "4TH YEAR" },
+                    ].map((tab) => {
+                      const active = hodYearFilter === tab.key;
+                      return (
+                        <TouchableOpacity key={tab.key} onPress={() => setHodYearFilter(tab.key)}
+                          style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20,
+                            backgroundColor: active ? "#7C3AED" : "#F1F5F9",
+                            borderWidth: 1, borderColor: active ? "#7C3AED" : "#E2E8F0" }}>
+                          <Text style={{ fontSize: 9, fontWeight: "900", color: active ? "#FFF" : "#64748B" }}>
+                            {tab.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+
+                  {/* Student cards — filtered: dept (API) → year → search */}
+                  {(() => {
+                    let list = deptSummary.absentList || [];
+                    if (hodYearFilter !== "ALL") list = list.filter((s) => s.year === hodYearFilter);
+                    const q = hodAbsentSearch.trim().toLowerCase();
+                    if (q) list = list.filter((s) => s.name?.toLowerCase().includes(q) || s.rollNumber?.toLowerCase().includes(q));
+
+                    if (list.length === 0) {
+                      return (
+                        <View style={{ alignItems: "center", paddingVertical: 20 }}>
+                          <Text style={{ fontSize: 28, marginBottom: 8 }}>
+                            {deptSummary.absentCount === 0 ? "🎉" : "🔍"}
+                          </Text>
+                          <Text style={{ fontSize: 13, fontWeight: "700", color: "#64748B" }}>
+                            {deptSummary.absentCount === 0 ? "All students have boarded!" : "No students match your filters."}
+                          </Text>
+                        </View>
+                      );
+                    }
+
+                    return list.map((s, i) => {
+                      const isLate = s.stage === "LATE";
+                      return (
+                        <View key={s.id || i} style={{
+                          flexDirection: "row", alignItems: "center", backgroundColor: "#FFF",
+                          padding: 12, marginBottom: 6, borderRadius: 12, borderWidth: 1,
+                          borderColor: isLate ? "#FDE68A" : "#FECACA", elevation: 1,
+                        }}>
+                          <View style={{
+                            width: 38, height: 38, borderRadius: 19,
+                            backgroundColor: isLate ? "#FEF9C3" : "#FEF2F2",
+                            justifyContent: "center", alignItems: "center", marginRight: 10,
+                          }}>
+                            <Text style={{ fontSize: 18 }}>{isLate ? "🕐" : "🚫"}</Text>
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 12, fontWeight: "800", color: "#1E293B" }}>
+                              {s.name} <Text style={{ color: "#94A3AF", fontWeight: "700" }}>({s.rollNumber || "—"})</Text>
+                            </Text>
+                            <Text style={{ fontSize: 10, color: "#64748B", fontWeight: "600", marginTop: 1 }} numberOfLines={1}>
+                              {[s.department, s.year, s.route].filter(Boolean).join(" • ")}
+                            </Text>
+                          </View>
+                          <View style={{ backgroundColor: isLate ? "#FEF9C3" : "#FEE2E2", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}>
+                            <Text style={{ fontSize: 9, fontWeight: "900", color: isLate ? "#CA8A04" : "#DC2626" }}>
+                              {isLate ? "LATE" : "ABSENT"}
+                            </Text>
+                          </View>
+                        </View>
+                      );
+                    });
+                  })()}
+                </>
+              )}
+            </View>
+          )}
+
+          {/* ── TODAY'S ATTENDANCE OVERVIEW ──────────────────────────────────── */}
+          {isHoD && (
+            <View style={{
+              backgroundColor: "#FFF", borderRadius: 16, padding: 16,
+              marginHorizontal: 16, marginBottom: 12, elevation: 2,
+              shadowColor: "#000", shadowOffset: { width: 0, height: 1 },
+              shadowOpacity: 0.06, shadowRadius: 4,
+            }}>
+              {/* Header */}
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                <Text style={{ fontSize: 13, fontWeight: "900", color: "#1E293B", flexShrink: 1 }}>
+                  📊 Today's Attendance Overview
+                </Text>
+                <View style={{ backgroundColor: "#EDE9FE", borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: "#DDD6FE", marginLeft: 8 }}>
+                  <Text style={{ fontSize: 9, fontWeight: "900", color: "#7C3AED" }}>PER BATCH</Text>
+                </View>
+              </View>
+
+              {!userDept ? (
+                <View style={{ alignItems: "center", paddingVertical: 20 }}>
+                  <Text style={{ fontSize: 28, marginBottom: 8 }}>🏢</Text>
+                  <Text style={{ fontSize: 12, fontWeight: "700", color: "#94A3B8" }}>No department assigned</Text>
+                </View>
+              ) : deptSummary.totalStudents === 0 ? (
+                <View style={{ alignItems: "center", paddingVertical: 20 }}>
+                  <Text style={{ fontSize: 28, marginBottom: 8 }}>📋</Text>
+                  <Text style={{ fontSize: 12, fontWeight: "700", color: "#94A3B8", textAlign: "center" }}>
+                    No students available for your assigned department.
+                  </Text>
+                </View>
+              ) : (
+                <>
+                  {/* Per-year grid */}
+                  {(() => {
+                    const allStudents = [
+                      ...(deptSummary.presentList || []).map((s) => ({ ...s, present: true })),
+                      ...(deptSummary.absentList || []).map((s) => ({ ...s, present: false })),
+                    ];
+                    const yearMap = {};
+                    allStudents.forEach((s) => {
+                      const yr = s.year || "Unknown";
+                      if (!yearMap[yr]) yearMap[yr] = { year: yr, present: 0, absent: 0, total: 0 };
+                      yearMap[yr].total += 1;
+                      if (s.present) yearMap[yr].present += 1;
+                      else yearMap[yr].absent += 1;
+                    });
+                    const ORDERED = ["1st Year", "2nd Year", "3rd Year", "4th Year"];
+                    const SHORT = { "1st Year": "1ST YR", "2nd Year": "2ND YR", "3rd Year": "3RD YR", "4th Year": "4TH YR" };
+                    const TARGET = 95;
+
+                    const totalStudents = deptSummary.totalStudents || 0;
+                    const presentCount = deptSummary.presentCount || 0;
+                    const overallRate = totalStudents ? Math.round((presentCount / totalStudents) * 100) : 0;
+
+                    return (
+                      <>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 14 }}>
+                          {ORDERED.map((yr) => {
+                            const d = yearMap[yr] || { year: yr, present: 0, absent: 0, total: 0 };
+                            const rate = d.total ? Math.round((d.present / d.total) * 100) : null;
+                            const rateColor = rate === null ? "#CBD5E1" : rate >= TARGET ? "#10B981" : rate >= 80 ? "#F59E0B" : "#EF4444";
+                            return (
+                              <View key={yr} style={{ flex: 1, alignItems: "center", paddingHorizontal: 4 }}>
+                                <Text style={{ fontSize: 22, fontWeight: "900", color: rateColor, marginBottom: 2 }}>
+                                  {rate !== null ? `${rate}%` : "—"}
+                                </Text>
+                                <Text style={{ fontSize: 9, fontWeight: "900", color: "#94A3B8", letterSpacing: 0.5 }}>
+                                  {SHORT[yr]}
+                                </Text>
+                                {d.total > 0 && (
+                                  <Text style={{ fontSize: 9, color: "#CBD5E1", fontWeight: "600", marginTop: 2 }}>
+                                    {d.present}/{d.total}
+                                  </Text>
+                                )}
+                              </View>
+                            );
+                          })}
+                        </View>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", paddingTop: 10, borderTopWidth: 1, borderTopColor: "#F1F5F9" }}>
+                          <Text style={{ fontSize: 11, fontWeight: "700", color: "#64748B" }}>
+                            Avg Attendance: <Text style={{ fontWeight: "900", color: overallRate >= TARGET ? "#10B981" : overallRate >= 80 ? "#F59E0B" : "#EF4444" }}>{overallRate}%</Text>
+                          </Text>
+                          <Text style={{ fontSize: 11, fontWeight: "700", color: "#64748B" }}>
+                            Target: <Text style={{ fontWeight: "900", color: "#7C3AED" }}>{TARGET}%</Text>
+                          </Text>
+                        </View>
+                      </>
+                    );
+                  })()}
+                </>
+              )}
             </View>
           )}
 
@@ -3303,6 +3529,7 @@ source: StudentApp-handleScanQR`);
         </Modal>
       </View>
 
+
       {!isHoD && (
         <LiveBusTrackingModal
           visible={showLiveMapModal}
@@ -3310,12 +3537,12 @@ source: StudentApp-handleScanQR`);
           user={
             userRole === "parent" && childProfile
               ? {
-                  ...user,
-                  vehicle: childProfile.vehicle || user?.vehicle,
-                  vehicleId: childProfile.vehicleId || childProfile.vehicle || user?.vehicleId,
-                  route: childProfile.route || user?.route,
-                  driverName: childProfile.driverName || user?.driverName,
-                }
+                ...user,
+                vehicle: childProfile.vehicle || user?.vehicle,
+                vehicleId: childProfile.vehicleId || childProfile.vehicle || user?.vehicleId,
+                route: childProfile.route || user?.route,
+                driverName: childProfile.driverName || user?.driverName,
+              }
               : user
           }
           token={token}

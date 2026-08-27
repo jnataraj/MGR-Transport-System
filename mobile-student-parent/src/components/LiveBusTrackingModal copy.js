@@ -32,9 +32,6 @@ const DEFAULT_COORDS = {
   longitude: 80.1780,
 };
 
-// Google Static Maps API key — set EXPO_PUBLIC_GOOGLE_MAPS_API_KEY in your .env
-const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
-
 // Safe coordinate parser (returns valid finite number or null)
 const parseCoord = (val) => {
   if (val === null || val === undefined || val === "") return null;
@@ -69,7 +66,6 @@ export default function LiveBusTrackingModal({
   const [error, setError] = useState(null);
   const [driverActive, setDriverActive] = useState(null);
   const [driverOnDuty, setDriverOnDuty] = useState(false);
-  const [tileFailed, setTileFailed] = useState(false);
 
   const offlineTimerRef = useRef(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -312,16 +308,10 @@ export default function LiveBusTrackingModal({
     longitude: hasValidBusCoords ? busLng : DEFAULT_COORDS.longitude,
   };
 
-  // Static Map tile snapshot URL (Google Static Maps)
+  // Static Map tile snapshot URL (using reliable OpenStreetMap tile renderer with fallback)
   const mapSnapshotUri = hasValidBusCoords
-    ? `https://maps.googleapis.com/maps/api/staticmap?center=${busLat},${busLng}&zoom=15&size=800x800&scale=2&maptype=roadmap&markers=color:blue%7C${busLat},${busLng}&key=${GOOGLE_MAPS_API_KEY}`
-    : `https://maps.googleapis.com/maps/api/staticmap?center=${DEFAULT_COORDS.latitude},${DEFAULT_COORDS.longitude}&zoom=14&size=800x800&scale=2&maptype=roadmap&key=${GOOGLE_MAPS_API_KEY}`;
-
-  // Reset the failure flag whenever we have a new tile to try (e.g. after refresh
-  // or once the bus's coordinates change), so a transient failure can recover.
-  useEffect(() => {
-    setTileFailed(false);
-  }, [mapSnapshotUri]);
+    ? `https://staticmap.openstreetmap.de/staticmap.php?center=${busLat},${busLng}&zoom=15&size=800x800&maptype=mapnik`
+    : `https://staticmap.openstreetmap.de/staticmap.php?center=${DEFAULT_COORDS.latitude},${DEFAULT_COORDS.longitude}&zoom=14&size=800x800&maptype=mapnik`;
 
   return (
     <Modal
@@ -444,23 +434,11 @@ export default function LiveBusTrackingModal({
           /* 100% Native Crash-Proof Interactive Live Bus Tracker */
           <View style={styles.mapContainer}>
             {/* Live Map Canvas / Background Tile Layer */}
-            {tileFailed ? (
-              <View style={[StyleSheet.absoluteFillObject, styles.tileFallback]}>
-                <MapPin size={32} color="#94A3B8" />
-                <Text style={styles.tileFallbackText}>Map preview unavailable</Text>
-              </View>
-            ) : (
-              <Image
-                source={{ uri: mapSnapshotUri }}
-                style={StyleSheet.absoluteFillObject}
-                resizeMode="cover"
-                onError={(e) => {
-                  console.log("[MapTile] load failed:", e.nativeEvent.error, mapSnapshotUri);
-                  setTileFailed(true);
-                }}
-                onLoad={() => console.log("[MapTile] loaded OK")}
-              />
-            )}
+            <Image
+              source={{ uri: mapSnapshotUri }}
+              style={StyleSheet.absoluteFillObject}
+              resizeMode="cover"
+            />
             {/* Subtle dark gradient overlay for high contrast */}
             <View style={styles.mapGridOverlay} />
 
@@ -723,17 +701,6 @@ const styles = StyleSheet.create({
   mapGridOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(15, 23, 42, 0.05)",
-  },
-  tileFallback: {
-    backgroundColor: "#E2E8F0",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  tileFallbackText: {
-    color: "#64748B",
-    marginTop: 8,
-    fontSize: 13,
-    fontWeight: "600",
   },
 
   // Top banner

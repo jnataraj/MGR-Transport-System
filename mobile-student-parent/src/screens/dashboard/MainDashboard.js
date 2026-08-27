@@ -88,8 +88,8 @@ export default function MainDashboard({ user, token, onLogout }) {
 
         <AbsentStudentsModal
           visible={absentVisible}
-          summary={dashboard.department.allSummary}
-          deptBreakdown={dashboard.department.allSummary.deptBreakdown}
+          summary={dashboard.department.summary}
+          deptBreakdown={dashboard.department.summary.deptBreakdown}
           department={user?.department || "Department"}
           onClose={() => setAbsentVisible(false)}
         />

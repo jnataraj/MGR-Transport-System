@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Crown, Plus, Edit, Trash2, Info, X, Eye, EyeOff } from "lucide-react";
 import Sidebar from "../../components/Sidebar";
 import Topbar from "../../components/Topbar";
-import { fetchUsers, createUser, updateUser, deleteUser } from "../../api";
+import { fetchUsers, createUser, updateUser, deleteUser, fetchHoDDepartments } from "../../api";
 import "./HoD.css"; // Adjust the import path as necessary
 import ConfirmDialog from "../../components/ConfirmDialog/ConfirmDialog";
 import { handleImageChange } from "../../components/imageResize";
@@ -38,12 +38,34 @@ const HoDs = () => {
   const [showDetailPassword, setShowDetailPassword] = useState(true);
   const [showHoDModalPassword, setShowHoDModalPassword] = useState(false);
 
+  // Department dropdown state
+  const [departments, setDepartments] = useState([]);
+  const [depsLoading, setDepsLoading] = useState(false);
+  const [depsError, setDepsError] = useState("");
+  const [departmentValue, setDepartmentValue] = useState("");
+
   const loadHoDs = async () => {
     try {
       const users = await fetchUsers("hod");
       setData(users.map(mapUserToVM));
     } catch (err) {
       console.error("Failed to load HoDs", err);
+    }
+  };
+
+  // Load the eligible department list from the server
+  const loadDepartments = async () => {
+    setDepsLoading(true);
+    setDepsError("");
+    try {
+      const result = await fetchHoDDepartments();
+      setDepartments(result.departments || []);
+    } catch (err) {
+      console.error("Failed to load departments", err);
+      setDepsError("Could not load departments. Please try again.");
+      setDepartments([]);
+    } finally {
+      setDepsLoading(false);
     }
   };
 
@@ -77,7 +99,7 @@ const HoDs = () => {
       name: formData.get("name"),
       phone: formData.get("phone"),
       role: "hod",
-      department: formData.get("department"),
+      department: departmentValue,
       email: formData.get("email"),
       location: formData.get("location"),
       shift: formData.get("shift"),
@@ -97,11 +119,12 @@ const HoDs = () => {
           const created = await createUser(payload);
           setData((prev) => [...prev, mapUserToVM(created)]);
         }
-      } catch (err) {
-        console.error("Save HoD failed", err);
-      } finally {
         setShowAddModal(false);
         setEditHoD(null);
+        setDepartmentValue("");
+      } catch (err) {
+        console.error("Save HoD failed", err);
+        alert(err.message || "Failed to save HoD. Please try again.");
       }
     })();
   };
@@ -129,7 +152,9 @@ const HoDs = () => {
                 setEditHoD(null);
                 setImagePreview("");
                 setImageError("");
+                setDepartmentValue("");
                 setShowAddModal(true);
+                loadDepartments();
               }}
             >
               <Plus size={18} /> Add HoD
@@ -248,13 +273,36 @@ const HoDs = () => {
 
                     <div className="hod-field">
                       <label>Department</label>
-                      <input
-                        name="department"
-                        type="text"
-                        placeholder="e.g. Computer Science & Engineering"
-                        defaultValue={editHoD?.department || ""}
-                        required
-                      />
+                      {depsLoading ? (
+                        <div className="hod-dept-loading">Loading departments…</div>
+                      ) : depsError ? (
+                        <div className="hod-dept-error">{depsError}</div>
+                      ) : (
+                        <select
+                          name="department"
+                          className="hod-dept-select"
+                          value={departmentValue}
+                          onChange={(e) => setDepartmentValue(e.target.value)}
+                          required
+                        >
+                          {departments.length === 0 ? (
+                            <option value="" disabled>
+                              No departments available
+                            </option>
+                          ) : (
+                            <>
+                              <option value="" disabled>
+                                — Select Department —
+                              </option>
+                              {departments.map((dept) => (
+                                <option key={dept} value={dept}>
+                                  {dept}
+                                </option>
+                              ))}
+                            </>
+                          )}
+                        </select>
+                      )}
                     </div>
 
                     <div className="hod-form-row">
@@ -326,6 +374,7 @@ const HoDs = () => {
                     onClick={() => {
                       setShowAddModal(false);
                       setEditHoD(null);
+                      setDepartmentValue("");
                     }}
                   >
                     Cancel
@@ -334,7 +383,7 @@ const HoDs = () => {
                     type="submit"
                     form="hod-form"
                     className="btn btn-primary hod-btn-save"
-                    disabled={imageProcessing}
+                    disabled={imageProcessing || depsLoading || departments.length === 0}
                   >
                     {imageProcessing ? "Processing image…" : "Save HoD"}
                   </button>
@@ -398,7 +447,9 @@ const HoDs = () => {
                               setEditHoD(user);
                               setImagePreview(user.image?.startsWith("data:") ? user.image : "");
                               setImageError("");
+                              setDepartmentValue(user.department || "");
                               setShowAddModal(true);
+                              loadDepartments();
                             }}
                           >
                             <Edit size={16} /> Edit
