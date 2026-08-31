@@ -1001,8 +1001,9 @@ exports.getDashboardBoardingSummary = async (req, res) => {
 
     const boardedStudentIds = new Set(todayScans.map((s) => s.userId));
     const zoneMap = new Map();
+    const busMap = new Map();
 
-    const getOrCreate = (zoneName) => {
+    const getOrCreateZone = (zoneName) => {
       if (!zoneMap.has(zoneName)) {
         zoneMap.set(zoneName, {
           zone: zoneName,
@@ -1014,19 +1015,49 @@ exports.getDashboardBoardingSummary = async (req, res) => {
       return zoneMap.get(zoneName);
     };
 
+    const getOrCreateBus = (vehicle) => {
+      const vKey = vehicle.id || vehicle.number;
+      if (!busMap.has(vKey)) {
+        busMap.set(vKey, {
+          id: vehicle.id,
+          busNumber: vehicle.number || "Unknown Bus",
+          routeName: vehicle.route?.trim() || "Unassigned",
+          assignedStudents: new Set(),
+          boardedStudents: new Set(),
+        });
+      }
+      return busMap.get(vKey);
+    };
+
     const assignedStudentIds = new Set();
     for (const student of students) {
       const assignment = student.studentAssignments?.[0];
       if (assignment?.vehicle) {
         const zoneName = assignment.vehicle.route?.trim() || "Unassigned";
-        const entry = getOrCreate(zoneName);
-        entry.assignedStudents.add(student.id);
-        entry.vehicles.add(assignment.vehicle.number);
+        const zEntry = getOrCreateZone(zoneName);
+        zEntry.assignedStudents.add(student.id);
+        zEntry.vehicles.add(assignment.vehicle.number);
         if (boardedStudentIds.has(student.id)) {
-          entry.boardedStudents.add(student.id);
+          zEntry.boardedStudents.add(student.id);
         }
+
+        const bEntry = getOrCreateBus(assignment.vehicle);
+        bEntry.assignedStudents.add(student.id);
+        if (boardedStudentIds.has(student.id)) {
+          bEntry.boardedStudents.add(student.id);
+        }
+
         assignedStudentIds.add(student.id);
       }
+    }
+
+    // Also include other active vehicles so all fleet buses can be represented
+    const allVehicles = await prisma.vehicle.findMany({
+      where: { status: { not: "inactive" } },
+      select: { id: true, number: true, route: true },
+    });
+    for (const v of allVehicles) {
+      getOrCreateBus(v);
     }
 
     const totalAssigned = assignedStudentIds.size;
@@ -1044,11 +1075,35 @@ exports.getDashboardBoardingSummary = async (req, res) => {
       }))
       .sort((a, b) => a.zone.localeCompare(b.zone));
 
+    const buses = Array.from(busMap.values())
+      .map((b) => {
+        const assigned = b.assignedStudents.size;
+        const loaded = b.boardedStudents.size;
+        const remaining = Math.max(0, assigned - loaded);
+        const percentage =
+          assigned > 0 ? Math.round((loaded / assigned) * 100) : 0;
+        return {
+          id: b.id,
+          busNumber: b.busNumber,
+          routeName: b.routeName,
+          assigned,
+          loaded,
+          remaining,
+          percentage,
+        };
+      })
+      .sort((a, b) => {
+        if (b.loaded !== a.loaded) return b.loaded - a.loaded;
+        if (b.assigned !== a.assigned) return b.assigned - a.assigned;
+        return a.busNumber.localeCompare(b.busNumber);
+      });
+
     return res.status(200).json({
       success: true,
       boarded: totalBoarded,
       total: totalAssigned,
       zones,
+      buses,
     });
   } catch (error) {
     console.error("getDashboardBoardingSummary Error:", error);

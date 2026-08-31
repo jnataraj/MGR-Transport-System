@@ -311,11 +311,16 @@ export const createBusChange = async (data) => {
   return handleResponse(response);
 };
 
-export const assignStudentBus = async (studentId, vehicleNumber) => {
+export const assignStudentBus = async (studentId, vehicleIdentifier, pickupPoint) => {
   const response = await fetch(`${API_BASE}/vehicles/students/assign`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ studentId, vehicleNumber }),
+    body: JSON.stringify({
+      studentId,
+      vehicleId: vehicleIdentifier,
+      vehicleNumber: vehicleIdentifier,
+      pickupPoint,
+    }),
   });
   return handleResponse(response);
 };

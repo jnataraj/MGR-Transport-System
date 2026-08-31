@@ -69,9 +69,21 @@ const normalizeVehicle = (vehicle) => ({
   studentIds: vehicle.assignedStudents?.map((a) => a.studentId) || [],
   coordinatorIds:
     vehicle.assignedCoordinators?.map((a) => a.coordinatorId) || [],
-  assignedStudents: vehicle.assignedStudents?.map((a) => a.student) || [],
+  assignedStudents:
+    vehicle.assignedStudents?.map((a) => ({
+      ...(a.student || {}),
+      studentId: a.studentId,
+      name: a.student?.name || a.studentName || "",
+      class: a.class || a.student?.department || null,
+      pickupPoint: a.pickupPoint || a.student?.location || null,
+      assignedAt: a.assignedAt,
+    })) || [],
   assignedCoordinators:
-    vehicle.assignedCoordinators?.map((a) => a.coordinator) || [],
+    vehicle.assignedCoordinators?.map((a) => ({
+      ...(a.coordinator || {}),
+      coordinatorId: a.coordinatorId,
+      assignedAt: a.assignedAt,
+    })) || [],
   driver: vehicle.driver || null,
 });
 
@@ -257,8 +269,21 @@ const fetchVehicleMembers = async (req, res) => {
     });
     if (!vehicle) return res.status(404).json({ error: "Vehicle not found" });
 
-    const coordinators = vehicle.assignedCoordinators?.map((a) => a.coordinator) || [];
-    const students = vehicle.assignedStudents?.map((a) => a.student) || [];
+    const coordinators =
+      vehicle.assignedCoordinators?.map((a) => ({
+        ...(a.coordinator || {}),
+        coordinatorId: a.coordinatorId,
+        assignedAt: a.assignedAt,
+      })) || [];
+    const students =
+      vehicle.assignedStudents?.map((a) => ({
+        ...(a.student || {}),
+        studentId: a.studentId,
+        name: a.student?.name || a.studentName || "",
+        class: a.class || a.student?.department || null,
+        pickupPoint: a.pickupPoint || a.student?.location || null,
+        assignedAt: a.assignedAt,
+      })) || [];
 
     res.json({
       vehicleId: vehicle.id,
@@ -295,9 +320,17 @@ const assignVehicleMembers = async (req, res) => {
       });
 
       if (studentIds && studentIds.length > 0) {
+        const studentUsers = await tx.user.findMany({
+          where: { id: { in: studentIds } },
+          select: { id: true, name: true, location: true, department: true },
+        });
+        const studentMap = new Map(studentUsers.map((u) => [u.id, u]));
         const studentAssignments = studentIds.map((sid) => ({
           vehicleId: id,
           studentId: sid,
+          studentName: studentMap.get(sid)?.name || "",
+          class: studentMap.get(sid)?.department || null,
+          pickupPoint: studentMap.get(sid)?.location || null,
         }));
         await tx.vehicleStudentAssignment.createMany({
           data: studentAssignments,
@@ -363,27 +396,50 @@ const removeVehicleMember = async (req, res) => {
 
 const assignStudentBus = async (req, res) => {
   try {
-    const { studentId, vehicleNumber } = req.body;
+    const { studentId, vehicleNumber, vehicleId, pickupPoint } = req.body;
     if (!studentId) {
       return res.status(400).json({ error: "studentId is required" });
     }
     await prisma.vehicleStudentAssignment.deleteMany({ where: { studentId } });
-    if (!vehicleNumber || vehicleNumber === "Not Assigned") {
-      return res.json({ success: true, vehicleNumber: null });
+    const targetIdentifier = vehicleId || vehicleNumber;
+    if (!targetIdentifier || targetIdentifier === "Not Assigned" || targetIdentifier === "") {
+      return res.json({ success: true, vehicleId: null, vehicleNumber: null, route: null });
     }
-    const vehicle = await prisma.vehicle.findFirst({ where: { number: vehicleNumber } });
+    const vehicle = await prisma.vehicle.findFirst({
+      where: {
+        OR: [
+          { id: targetIdentifier },
+          { number: targetIdentifier },
+        ],
+      },
+    });
     if (!vehicle) {
-      return res.status(404).json({ error: `Vehicle ${vehicleNumber} not found` });
+      return res.status(404).json({ error: `Vehicle ${targetIdentifier} not found` });
     }
     const student = await prisma.user.findUnique({ where: { id: studentId } });
+    const effectivePickup = pickupPoint !== undefined && pickupPoint !== "" ? pickupPoint : (student?.location || null);
     await prisma.vehicleStudentAssignment.create({
       data: {
         vehicleId: vehicle.id,
         studentId,
         studentName: student?.name || "",
+        class: student?.department || null,
+        pickupPoint: effectivePickup || undefined,
       },
     });
-    res.json({ success: true, vehicleNumber: vehicle.number });
+    if (pickupPoint !== undefined && pickupPoint !== "") {
+      await prisma.user.update({
+        where: { id: studentId },
+        data: { location: pickupPoint },
+      });
+    }
+    res.json({
+      success: true,
+      vehicleId: vehicle.id,
+      vehicleNumber: vehicle.number,
+      route: vehicle.route || null,
+      pickupPoint: effectivePickup || null,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to assign student bus" });

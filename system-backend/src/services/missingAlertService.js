@@ -2,11 +2,58 @@ const prisma = require("../prisma/prisma");
 const { getVehicleLocation, calculateDistanceMeters, setVehicleLocation } = require("../utils/vehicleLocationStore");
 const { sendPushNotification } = require("../utils/notification");
 
-const MISSING_DISTANCE_THRESHOLD_METERS = 10; // 10 meters rule
+// ─── Configurable thresholds (override via environment variables) ─────────────
 
-// In-memory store of students currently in transit
-// studentId -> { studentId, studentName, studentRollNo, vehicleId, vehicleNumber, driverId, driverName, stage, studentLat, studentLng, lastStudentUpdate, activeAlertId }
+/**
+ * Distance (in metres) the bus must be from the student to raise a Missing Alert.
+ * This is STUDENT-TO-BUS distance — NOT student movement distance.
+ */
+const MISSING_DISTANCE_THRESHOLD_METERS =
+  process.env.MISSING_DISTANCE_THRESHOLD_METERS
+    ? parseFloat(process.env.MISSING_DISTANCE_THRESHOLD_METERS)
+    : 10;
+
+/**
+ * Minimum GPS displacement (in metres) required to consider a student MOVING.
+ * Changes smaller than this are treated as GPS jitter and the student is marked STATIONARY.
+ * Single source of truth — do NOT duplicate this value anywhere else.
+ */
+const STUDENT_MOVEMENT_THRESHOLD_METERS =
+  process.env.STUDENT_MOVEMENT_THRESHOLD_METERS
+    ? parseFloat(process.env.STUDENT_MOVEMENT_THRESHOLD_METERS)
+    : 10;
+
+/**
+ * Maximum age (milliseconds) of a student GPS fix before it is considered STALE.
+ * A stale fix must NOT trigger a MOVING status — we simply don't know where the student is.
+ */
+const STUDENT_LOCATION_STALE_MS =
+  process.env.STUDENT_LOCATION_STALE_MS
+    ? parseInt(process.env.STUDENT_LOCATION_STALE_MS, 10)
+    : 90_000; // 90 seconds default
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * In-memory store of students currently in transit.
+ * studentId -> {
+ *   studentId, studentName, studentRollNo,
+ *   vehicleId, vehicleNumber, driverId, driverName, stage,
+ *   studentLat, studentLng, lastStudentUpdate, activeAlertId,
+ *   studentMovementDistance,  // metres student moved between last two GPS fixes
+ *   studentMovementStatus,    // "MOVING" | "STATIONARY" | "STALE" | "UNKNOWN"
+ * }
+ */
 const inTransitStudents = new Map();
+
+/**
+ * Previous GPS fix per student — used ONLY for student movement calculation.
+ * studentId -> { lat, lng, timestamp }
+ *
+ * Completely separate from studentLat/studentLng in inTransitStudents
+ * and completely separate from bus/driver location.
+ */
+const studentPreviousLocations = new Map();
 
 /**
  * Format coordinates nicely for display
@@ -305,9 +352,22 @@ const dispatchMissingAlertNotifications = async (io, alertPayload, studentTransi
   } = await resolveMissingAlertRecipients(studentTransit);
 
   const title = "🚨 Student Missing Alert";
-  const driverMessage = `Student: ${studentTransit.studentName}\nDistance: ${(Math.round(distanceMeters * 10) / 10).toFixed(1)} m\nPlease check the student's location.`;
-  const parentMessage = `Alert: Student ${studentTransit.studentName} is more than 10 meters away from assigned vehicle ${assignedVehicleNumber}. Please check student status.`;
-  const hodMessage = `Alert: Student ${studentTransit.studentName} (${studentTransit.studentRollNo || studentUser?.rollNumber || "N/A"}) from ${studentDepartment || "Department"} is more than 10 meters away from assigned vehicle ${assignedVehicleNumber}.`;
+  // distanceMeters passed in = STUDENT-TO-BUS distance (NOT student movement)
+  const studentBusDistStr = (Math.round(distanceMeters * 10) / 10).toFixed(1);
+  const movementStatus = studentTransit.studentMovementStatus || "UNKNOWN";
+  const driverMessage =
+    `Student: ${studentTransit.studentName}\n` +
+    `Student ↔ Bus Distance: ${studentBusDistStr} m (> ${MISSING_DISTANCE_THRESHOLD_METERS}m threshold)\n` +
+    `Student Movement: ${movementStatus}\n` +
+    `Please check the student's location.`;
+  const parentMessage =
+    `Alert: Student ${studentTransit.studentName} is more than ${MISSING_DISTANCE_THRESHOLD_METERS} meters away from ` +
+    `assigned vehicle ${assignedVehicleNumber}. Student movement status: ${movementStatus}. Please check student status.`;
+  const hodMessage =
+    `Alert: Student ${studentTransit.studentName} ` +
+    `(${studentTransit.studentRollNo || studentUser?.rollNumber || "N/A"}) from ` +
+    `${studentDepartment || "Department"} is more than ${MISSING_DISTANCE_THRESHOLD_METERS} meters away from ` +
+    `assigned vehicle ${assignedVehicleNumber}. Student movement: ${movementStatus}.`;
 
   const commonData = {
     alertId: alertPayload.id,
@@ -317,7 +377,12 @@ const dispatchMissingAlertNotifications = async (io, alertPayload, studentTransi
     department: studentDepartment,
     vehicleId: assignedVehicleId,
     vehicleNumber: assignedVehicleNumber,
+    // Proximity: student ↔ bus distance (what triggered the alert)
     distanceMeters: alertPayload.distanceMeters,
+    studentBusDistance: alertPayload.studentBusDistance ?? alertPayload.distanceMeters,
+    // Student movement: independent of bus position
+    studentMovementStatus: movementStatus,
+    studentMovementDistance: alertPayload.studentMovementDistance ?? 0,
     driverAlertTitle: title,
     driverAlertMessage: driverMessage,
     notificationType: "missing_alert",
@@ -854,7 +919,13 @@ const evaluateProximity = async (studentId, io) => {
     }
 
     const driverAlertTitle = "🚨 Student Missing Alert";
-    const driverAlertMessage = `Student: ${studentTransit.studentName}\nDistance: ${(Math.round(distanceMeters * 10) / 10).toFixed(1)} m\nPlease check the student's location.`;
+    // distanceMeters here is STUDENT-TO-BUS distance, NOT student movement distance.
+    const studentBusDistanceFormatted = (Math.round(distanceMeters * 10) / 10).toFixed(1);
+    const driverAlertMessage =
+      `Student: ${studentTransit.studentName}\n` +
+      `Student ↔ Bus Distance: ${studentBusDistanceFormatted} m (> ${MISSING_DISTANCE_THRESHOLD_METERS}m threshold)\n` +
+      `Student Movement: ${studentTransit.studentMovementStatus || "UNKNOWN"}\n` +
+      `Please check the student's location.`;
 
     const alertPayload = {
       id: alertRecord?.id || `temp-${studentTransit.studentId}`,
@@ -871,7 +942,21 @@ const evaluateProximity = async (studentId, io) => {
       driverLng,
       studentLat,
       studentLng,
-      distanceMeters: Math.round(distanceMeters * 10) / 10,
+      // ── Proximity (student ↔ bus) ─────────────────────────────────────────
+      // This is the distance between the student's current GPS and the bus's
+      // current GPS. It is what triggered this alert (> MISSING_DISTANCE_THRESHOLD_METERS).
+      // It must NOT be interpreted as "how far the student moved".
+      distanceMeters: Math.round(distanceMeters * 10) / 10,   // kept for DB & backward compat
+      studentBusDistance: Math.round(distanceMeters * 10) / 10, // explicit alias
+      missingDistanceThreshold: MISSING_DISTANCE_THRESHOLD_METERS,
+      // ── Student Movement (student prev GPS → student current GPS) ────────
+      // These fields reflect actual student movement, computed independently
+      // of the bus location.
+      studentMovementDistance: studentTransit.studentMovementDistance ?? 0,
+      studentMovementStatus: studentTransit.studentMovementStatus || "UNKNOWN",
+      studentMovementThreshold: STUDENT_MOVEMENT_THRESHOLD_METERS,
+      // ── Timestamps ────────────────────────────────────────────────────────
+      studentLocationTimestamp: studentTransit.studentLocationTimestamp || new Date().toISOString(),
       alertTime: alertRecord?.alertTime || new Date(),
       status: "ACTIVE",
       stage: studentTransit.stage,
@@ -910,7 +995,13 @@ const evaluateProximity = async (studentId, io) => {
 };
 
 /**
- * Handle student location update (via socket or REST)
+ * Handle student location update (via socket or REST).
+ *
+ * IMPORTANT: studentMovementDistance and studentMovementStatus are computed HERE
+ * by comparing the student's PREVIOUS GPS fix to the current one.
+ * This is completely separate from:
+ *   - student-to-bus distance (computed in evaluateProximity)
+ *   - bus/driver movement (computed when driver GPS arrives)
  */
 const updateStudentLocation = async ({
   studentId,
@@ -929,6 +1020,55 @@ const updateStudentLocation = async ({
   if (isNaN(validLat) || isNaN(validLng) || Math.abs(validLat) < 0.001 || Math.abs(validLng) < 0.001) {
     return null;
   }
+
+  // ── Step 1: Compute STUDENT MOVEMENT (prev student GPS → current student GPS) ──
+  // This is the ONLY correct way to determine if the student moved.
+  // Do NOT use student-to-bus distance for this purpose.
+  const now = new Date();
+  const prevStudentLoc = studentPreviousLocations.get(studentId);
+
+  let studentMovementDistance = 0;
+  let studentMovementStatus = "UNKNOWN";
+
+  if (prevStudentLoc) {
+    const locationAgeMs = now.getTime() - prevStudentLoc.timestamp.getTime();
+
+    if (locationAgeMs > STUDENT_LOCATION_STALE_MS) {
+      // Previous fix is too old — we cannot reliably compute movement from it.
+      // Mark as STALE rather than risk a false MOVING status.
+      studentMovementStatus = "STALE";
+      studentMovementDistance = 0;
+      console.log(`[missingAlertService] ⏱ Student ${studentId} prev GPS is stale (${Math.round(locationAgeMs / 1000)}s old) — movement status: STALE`);
+    } else {
+      // Compute Haversine distance between previous student GPS and current student GPS.
+      // This is STUDENT movement — nothing to do with the bus location.
+      studentMovementDistance = calculateDistanceMeters(
+        prevStudentLoc.lat, prevStudentLoc.lng,
+        validLat, validLng
+      );
+
+      if (studentMovementDistance > STUDENT_MOVEMENT_THRESHOLD_METERS) {
+        studentMovementStatus = "MOVING";
+      } else {
+        // Change is within jitter threshold — student is considered stationary.
+        studentMovementStatus = "STATIONARY";
+        studentMovementDistance = 0; // suppress sub-threshold noise
+      }
+
+      console.log(
+        `[missingAlertService] 📍 Student ${studentId} movement: ` +
+        `${studentMovementDistance.toFixed(1)}m from prev GPS → status: ${studentMovementStatus} ` +
+        `(threshold: ${STUDENT_MOVEMENT_THRESHOLD_METERS}m)`
+      );
+    }
+  } else {
+    // First GPS fix for this student — no previous position to compare.
+    studentMovementStatus = "UNKNOWN";
+  }
+
+  // Always update the previous location store with the latest valid fix.
+  studentPreviousLocations.set(studentId, { lat: validLat, lng: validLng, timestamp: now });
+  // ────────────────────────────────────────────────────────────────────────────
 
   let transit = inTransitStudents.get(studentId);
   if (!transit) {
@@ -982,14 +1122,21 @@ const updateStudentLocation = async ({
   }
 
   if (transit) {
+    // Update current student GPS in the transit entry
     transit.studentLat = validLat;
     transit.studentLng = validLng;
-    transit.lastStudentUpdate = new Date();
+    transit.lastStudentUpdate = now;
+    // Store student movement fields (separate from student-to-bus distance)
+    transit.studentMovementDistance = studentMovementDistance;
+    transit.studentMovementStatus = studentMovementStatus;
+    transit.studentLocationTimestamp = now.toISOString();
+
     if (studentName) transit.studentName = studentName;
     if (studentRollNo) transit.studentRollNo = studentRollNo;
     if (vehicleId && (!transit.vehicleId || transit.vehicleId === "N/A")) transit.vehicleId = vehicleId;
     if (vehicleNumber && (!transit.vehicleNumber || transit.vehicleNumber === "N/A")) transit.vehicleNumber = vehicleNumber;
 
+    // evaluateProximity computes student-to-bus distance (separate from movement above)
     return await evaluateProximity(studentId, io);
   }
 
@@ -1350,6 +1497,8 @@ const endStudentTransit = async ({ studentId, reason = "Arrived at College", io 
   if (!studentId) return;
 
   inTransitStudents.delete(studentId);
+  // Clear the student's previous GPS fix so it doesn't persist across trips
+  studentPreviousLocations.delete(studentId);
 
   try {
     // Close any active missing alerts for this student in the database
@@ -1378,6 +1527,8 @@ const endVehicleTransit = async ({ vehicleId, reason = "Trip Completed", io }) =
   for (const [studentId, transit] of inTransitStudents.entries()) {
     if (transit.vehicleId === vehicleId || transit.vehicleNumber === vehicleId) {
       inTransitStudents.delete(studentId);
+      // Clear the student's previous GPS fix so it doesn't persist across trips
+      studentPreviousLocations.delete(studentId);
     }
   }
 

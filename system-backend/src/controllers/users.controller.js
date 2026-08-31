@@ -45,6 +45,7 @@ const sanitizeUserData = async (data, { isUpdate = false } = {}) => {
     ...(parentPhone !== undefined && { parentPhone }),
     ...(image !== undefined && { image }),
     ...(location !== undefined && { location }),
+    ...(data.pickupPoint !== undefined && { location: data.pickupPoint }),
     ...(shift !== undefined && { shift }),
   };
 };
@@ -68,6 +69,9 @@ const formatUser = (user) => {
     return assignedIds.some((id) => isVehicleOnline(id));
   })();
 
+  const primaryVehicle = vehicleList[0] || null;
+  const assignment = user.studentAssignments?.[0] || null;
+
   return {
     ...rest,
     isOnline,
@@ -80,6 +84,11 @@ const formatUser = (user) => {
       vehicleList.length > 0
         ? vehicleList.map((v) => v.number).join(", ")
         : "Not Assigned",
+
+    vehicleId: primaryVehicle?.id || null,
+    vehicleNumber: primaryVehicle?.number || null,
+    route: primaryVehicle?.route || null,
+    pickupPoint: assignment?.pickupPoint || user.location || null,
 
     vehicleIds: vehicleList.map((v) => v.id),
 
@@ -228,10 +237,11 @@ const assignDriverToVehicle = async (userId, rawVehicleIds = []) => {
   }
 };
 
-const assignStudentToVehicle = async (studentId, rawVehicleIds = [], studentName = "") => {
+const assignStudentToVehicle = async (studentId, rawVehicleIds = [], studentName = "", pickupPoint = "", className = "") => {
   let vehicleIds = Array.isArray(rawVehicleIds) ? rawVehicleIds : (rawVehicleIds ? [rawVehicleIds] : []);
   let cleanIds = vehicleIds.filter((id) => id && id !== "Not Assigned");
 
+  await prisma.vehicleStudentAssignment.deleteMany({ where: { studentId } });
   if (cleanIds.length === 0) return;
 
   const vehicles = await prisma.vehicle.findMany({
@@ -240,13 +250,14 @@ const assignStudentToVehicle = async (studentId, rawVehicleIds = [], studentName
   });
 
   if (vehicles.length > 0) {
-    await prisma.vehicleStudentAssignment.deleteMany({ where: { studentId } });
     for (const v of vehicles) {
       await prisma.vehicleStudentAssignment.create({
         data: {
           vehicleId: v.id,
           studentId,
           studentName: studentName || "",
+          class: className || undefined,
+          pickupPoint: pickupPoint || undefined,
         },
       });
     }
@@ -457,7 +468,13 @@ const createUser = async (req, res) => {
     const user = await prisma.user.create({ data: userData });
 
     if (user.role?.toLowerCase() === "student") {
-      await assignStudentToVehicle(user.id, vehicleIds, user.name);
+      await assignStudentToVehicle(
+        user.id,
+        vehicleIds,
+        user.name,
+        data.pickupPoint || data.location,
+        user.department || user.year
+      );
     } else {
       await assignDriverToVehicle(user.id, vehicleIds);
     }
@@ -518,7 +535,13 @@ const updateUser = async (req, res) => {
     const user = await prisma.user.update({ where: { id }, data: userData });
 
     if (user.role?.toLowerCase() === "student") {
-      await assignStudentToVehicle(id, vehicleIds, user.name);
+      await assignStudentToVehicle(
+        id,
+        vehicleIds,
+        user.name,
+        data.pickupPoint || data.location,
+        user.department || user.year
+      );
     } else {
       await assignDriverToVehicle(id, vehicleIds);
     }

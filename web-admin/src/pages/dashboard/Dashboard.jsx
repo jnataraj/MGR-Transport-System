@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useContext, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   BusFront,
   UserCog,
@@ -37,6 +38,7 @@ import {
   fetchRouteAlerts,
   fetchMissingAlerts,
   createRouteAlert,
+  fetchVehicleMembers,
   API_BASE,
 } from "../../api";
 
@@ -163,11 +165,13 @@ const StatCard = ({ icon, label, value, sub, color, bg, onClick, pulse }) => (
    DASHBOARD PAGE
 ═══════════════════════════════════════════════════════════════════ */
 const Dashboard = () => {
+  const navigate = useNavigate();
   // ── State ──
   const [stats, setStats] = useState(null);
   const [alertBreak, setAlertBreak] = useState(null);
   const [zones, setZones] = useState([]);
   const [zoneBoarded, setZoneBoarded] = useState({ boarded: 0, total: 0 });
+  const [busLoadedList, setBusLoadedList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState(null);
   // Live transit + halt indicators
@@ -181,6 +185,12 @@ const Dashboard = () => {
 
   // Modals
   const [modal, setModal] = useState(null); // 'vehicles'|'drivers'|'issues'|'alerts'|'students'|'notify'
+
+  // Bus Students Dialog
+  const [selectedBus, setSelectedBus] = useState(null); // the clicked bus object from displayBusLoadedList
+  const [busStudents, setBusStudents] = useState([]);
+  const [busStudentsLoading, setBusStudentsLoading] = useState(false);
+  const [busStudentsError, setBusStudentsError] = useState(null);
 
   // Alert tab inside alerts modal
   const [alertTab, setAlertTab] = useState("all"); // all|route|driver|admin
@@ -220,7 +230,7 @@ const Dashboard = () => {
         fetchUsers("driver").catch(() => []),
         fetchMaintenanceOverview().catch(() => ({})),
         fetchLiveVehicles().catch(() => []),
-        fetchDashboardBoardingSummary().catch(() => ({ boarded: 0, total: 0, zones: [] })),
+        fetchDashboardBoardingSummary().catch(() => ({ boarded: 0, total: 0, zones: [], buses: [] })),
         fetchRouteAlerts({ today: true }).catch(() => ({ success: true, routeAlerts: [], totals: { total: 0, route: 0, driver: 0, admin: 0, missing: 0 } })),
       ]);
 
@@ -281,13 +291,14 @@ const Dashboard = () => {
         setMissingAlerts([]);
       }
 
-      // ── Boarding summary (Students Boarded Today + Zone Attendance) ──────────
+      // ── Boarding summary (Students Boarded Today + Zone Attendance + Bus Loaded List) ──
       if (boardingSummary && boardingSummary.success !== false) {
         setZoneBoarded({
           boarded: boardingSummary.boarded ?? 0,
           total: boardingSummary.total ?? 0,
         });
         setZones(Array.isArray(boardingSummary.zones) ? boardingSummary.zones : []);
+        setBusLoadedList(Array.isArray(boardingSummary.buses) ? boardingSummary.buses : []);
       }
 
       setLastRefresh(new Date());
@@ -537,6 +548,21 @@ const Dashboard = () => {
   const vehicleOptions = useMemo(() => {
     return vehiclesList.map((v) => v.number || v.id).filter(Boolean).sort();
   }, [vehiclesList]);
+
+  const displayBusLoadedList = useMemo(() => {
+    if (busLoadedList && busLoadedList.length > 0) {
+      return busLoadedList;
+    }
+    return vehiclesList.map((v) => ({
+      id: v.id,
+      busNumber: v.number || v.id || "Unknown Bus",
+      routeName: v.route || "Unassigned",
+      assigned: 0,
+      loaded: 0,
+      remaining: 0,
+      percentage: 0,
+    }));
+  }, [busLoadedList, vehiclesList]);
 
   const filteredGpsData = useMemo(() => {
     return gpsData.filter((v) => {
@@ -817,7 +843,7 @@ const Dashboard = () => {
               className="db-section-heading db-section-heading--sm"
               style={{ color: "#DC2626", display: "flex", alignItems: "center", justifyContent: "space-between" }}
             >
-              <span>🚨 Student Missing Alerts (Distance &gt; 10m from Driver)</span>
+              <span>🚨 Student Missing Alerts (Student &gt; {alertBreak?.missingDistanceThreshold ?? 10}m from Assigned Bus)</span>
               {activeMissingCount > 0 && (
                 <span className="db-pill db-pill--pulse-red">
                   {activeMissingCount} ACTIVE
@@ -862,12 +888,38 @@ const Dashboard = () => {
                         <span className="db-missing-k">Vehicle Number:</span>
                         <span className="db-missing-v font-bold">🚌 {m.vehicleNumber || m.vehicleId || "N/A"}</span>
                       </div>
+                      {/* Student ↔ Bus Distance — this is proximity to the bus, NOT how far the student moved */}
                       <div className="db-missing-grid-item">
-                        <span className="db-missing-k">Distance:</span>
+                        <span className="db-missing-k">Student ↔ Bus Distance:</span>
                         <span className={`db-missing-v ${isActive ? "db-missing-distance-alert" : ""}`}>
-                          📏 {m.distanceMeters} m {isActive ? "(> 10m limit)" : ""}
+                          📏 {m.studentBusDistance ?? m.distanceMeters} m from Bus
+                          {isActive ? ` (> ${m.missingDistanceThreshold ?? 10}m proximity threshold)` : ""}
                         </span>
                       </div>
+                      {/* Student Movement — computed from student's own GPS history, separate from bus proximity */}
+                      {(m.studentMovementStatus || m.studentMovementDistance != null) && (
+                        <div className="db-missing-grid-item">
+                          <span className="db-missing-k">Student Movement:</span>
+                          <span
+                            className={`db-missing-v ${
+                              m.studentMovementStatus === "MOVING"
+                                ? "db-missing-distance-alert"
+                                : m.studentMovementStatus === "STALE"
+                                  ? "db-missing-stale"
+                                  : ""
+                            }`}
+                          >
+                            {m.studentMovementStatus === "MOVING" && "🏃 MOVING"}
+                            {m.studentMovementStatus === "STATIONARY" && "🧍 STATIONARY"}
+                            {m.studentMovementStatus === "STALE" && "⏱ STALE (GPS outdated)"}
+                            {m.studentMovementStatus === "UNKNOWN" && "❓ UNKNOWN"}
+                            {!m.studentMovementStatus && "— "}
+                            {m.studentMovementStatus === "MOVING" && m.studentMovementDistance > 0
+                              ? ` · moved ${m.studentMovementDistance.toFixed(1)} m`
+                              : ""}
+                          </span>
+                        </div>
+                      )}
                       <div className="db-missing-grid-item">
                         <span className="db-missing-k">Alert Time:</span>
                         <span className="db-missing-v">🕐 {fmt(m.alertTime || m.createdAt)}</span>
@@ -1014,6 +1066,370 @@ const Dashboard = () => {
               ),
             )}
           </section>
+        )}
+      </Modal>
+    );
+  };
+
+  /* ── Bus Students Dialog ──────────────────────────────────────── */
+  const handleBusCardClick = async (bus) => {
+    setSelectedBus(bus);
+    setBusStudents([]);
+    setBusStudentsError(null);
+    setBusStudentsLoading(true);
+    try {
+      // Fetch members assigned to this vehicle
+      const vehicleId = bus.id;
+      if (!vehicleId) {
+        setBusStudentsError("Vehicle ID not available for this bus.");
+        setBusStudentsLoading(false);
+        return;
+      }
+      const [membersData, attendanceData] = await Promise.all([
+        fetchVehicleMembers(vehicleId),
+        fetch(`${API_BASE}/attendance?type=student_scan`)
+          .then((r) => r.json())
+          .catch(() => []),
+      ]);
+
+      // Build a set of student IDs who scanned attendance today
+      const today = new Date();
+      const todayStr = today.toISOString().split("T")[0];
+      const boardedTodayIds = new Set();
+      const records = Array.isArray(attendanceData)
+        ? attendanceData
+        : attendanceData?.records || attendanceData?.attendance || [];
+      for (const rec of records) {
+        if (
+          rec.type === "student_scan" &&
+          rec.scannedAt &&
+          rec.scannedAt.startsWith(todayStr)
+        ) {
+          if (rec.userId) boardedTodayIds.add(rec.userId);
+        }
+      }
+
+      const rawStudents = membersData?.students || [];
+      const enriched = rawStudents.map((s) => ({
+        ...s,
+        boardingStatus: boardedTodayIds.has(s.id || s.studentId)
+          ? "Boarded"
+          : "Not Boarded",
+      }));
+      setBusStudents(enriched);
+    } catch (err) {
+      console.error("Bus students fetch error:", err);
+      setBusStudentsError(
+        err?.message || "Failed to load assigned students. Please try again."
+      );
+    } finally {
+      setBusStudentsLoading(false);
+    }
+  };
+
+  const closeBusStudentsDialog = () => {
+    setSelectedBus(null);
+    setBusStudents([]);
+    setBusStudentsError(null);
+  };
+
+  const BoardingStatusBadge = ({ status }) => {
+    const styles = {
+      Boarded: { background: "#D1FAE5", color: "#065F46" },
+      "Not Boarded": { background: "#FEE2E2", color: "#991B1B" },
+      Boarding: { background: "#DBEAFE", color: "#1D4ED8" },
+      "On Route": { background: "#E0E7FF", color: "#3730A3" },
+      Dropped: { background: "#FEF3C7", color: "#92400E" },
+      Completed: { background: "#D1FAE5", color: "#065F46" },
+      Absent: { background: "#F3F4F6", color: "#374151" },
+    };
+    const s = styles[status] || { background: "#F1F5F9", color: "#475569" };
+    return (
+      <span
+        className="db-pill"
+        style={{
+          background: s.background,
+          color: s.color,
+          fontWeight: 800,
+          fontSize: "0.7rem",
+          padding: "3px 9px",
+        }}
+      >
+        {status}
+      </span>
+    );
+  };
+
+  const renderBusStudentsModal = () => {
+    if (!selectedBus) return null;
+    const assigned = selectedBus.assigned ?? 0;
+    const loaded = selectedBus.loaded ?? 0;
+    const remaining = selectedBus.remaining ?? Math.max(0, assigned - loaded);
+    return (
+      <Modal
+        title="Assigned Students"
+        icon={<GraduationCap size={18} color="#1D4ED8" />}
+        onClose={closeBusStudentsDialog}
+        width={680}
+      >
+        {/* Bus info header */}
+        <div
+          style={{
+            background: "linear-gradient(135deg, #EFF6FF, #DBEAFE)",
+            border: "1px solid #BFDBFE",
+            borderRadius: 12,
+            padding: "14px 18px",
+            marginBottom: 16,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: 8,
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  fontWeight: 900,
+                  fontSize: "1rem",
+                  color: "#1E3A8A",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <BusFront size={16} color="#1D4ED8" />
+                Bus: {selectedBus.busNumber}
+              </div>
+              <div
+                style={{
+                  fontSize: "0.78rem",
+                  color: "#3B82F6",
+                  marginTop: 2,
+                  fontWeight: 600,
+                }}
+              >
+                Route: {selectedBus.routeName || "Unassigned"}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <div
+                style={{
+                  textAlign: "center",
+                  padding: "8px 14px",
+                  background: "#fff",
+                  borderRadius: 10,
+                  border: "1px solid #BFDBFE",
+                }}
+              >
+                <div
+                  style={{
+                    fontWeight: 900,
+                    fontSize: "1.1rem",
+                    color: "#1D4ED8",
+                  }}
+                >
+                  {assigned}
+                </div>
+                <div
+                  style={{
+                    fontSize: "0.65rem",
+                    color: "#64748B",
+                    fontWeight: 700,
+                  }}
+                >
+                  Assigned
+                </div>
+              </div>
+              <div
+                style={{
+                  textAlign: "center",
+                  padding: "8px 14px",
+                  background: "#fff",
+                  borderRadius: 10,
+                  border: "1px solid #BBF7D0",
+                }}
+              >
+                <div
+                  style={{
+                    fontWeight: 900,
+                    fontSize: "1.1rem",
+                    color: "#059669",
+                  }}
+                >
+                  {loaded}
+                </div>
+                <div
+                  style={{
+                    fontSize: "0.65rem",
+                    color: "#64748B",
+                    fontWeight: 700,
+                  }}
+                >
+                  Boarded
+                </div>
+              </div>
+              <div
+                style={{
+                  textAlign: "center",
+                  padding: "8px 14px",
+                  background: "#fff",
+                  borderRadius: 10,
+                  border: "1px solid #FECACA",
+                }}
+              >
+                <div
+                  style={{
+                    fontWeight: 900,
+                    fontSize: "1.1rem",
+                    color: "#DC2626",
+                  }}
+                >
+                  {remaining}
+                </div>
+                <div
+                  style={{
+                    fontSize: "0.65rem",
+                    color: "#64748B",
+                    fontWeight: 700,
+                  }}
+                >
+                  Remaining
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Student list */}
+        {busStudentsLoading ? (
+          <div
+            style={{
+              textAlign: "center",
+              padding: "2.5rem",
+              color: "#94A3B8",
+              fontSize: "0.88rem",
+            }}
+          >
+            <div
+              style={{
+                width: 28,
+                height: 28,
+                border: "3px solid #DBEAFE",
+                borderTopColor: "#3B82F6",
+                borderRadius: "50%",
+                animation: "spin 0.8s linear infinite",
+                margin: "0 auto 10px",
+              }}
+            />
+            Loading assigned students…
+          </div>
+        ) : busStudentsError ? (
+          <div
+            style={{
+              padding: "18px 16px",
+              background: "#FEF2F2",
+              border: "1px solid #FECACA",
+              borderRadius: 10,
+              color: "#991B1B",
+              fontSize: "0.85rem",
+              textAlign: "center",
+            }}
+          >
+            ⚠️ {busStudentsError}
+          </div>
+        ) : busStudents.length === 0 ? (
+          <div className="db-empty-box">
+            No students assigned to this bus.
+          </div>
+        ) : (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+              maxHeight: 380,
+              overflowY: "auto",
+              paddingRight: 4,
+            }}
+          >
+            {busStudents.map((student, idx) => {
+              const studentId =
+                student.rollNumber ||
+                student.id?.substring(0, 8).toUpperCase() ||
+                student.studentId?.substring(0, 8).toUpperCase() ||
+                "N/A";
+              const name = student.name || student.studentName || "Unknown";
+              const pickupPoint =
+                student.pickupPoint || student.location || "—";
+              const dept = student.class || student.department || "—";
+              return (
+                <div
+                  key={student.id || student.studentId || idx}
+                  style={{
+                    padding: "12px 14px",
+                    background: "#F8FAFC",
+                    border: "1px solid #E2E8F0",
+                    borderRadius: 10,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 10,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontWeight: 800,
+                        fontSize: "0.88rem",
+                        color: "#0F172A",
+                        marginBottom: 4,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                      }}
+                    >
+                      👤 {name}
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        gap: "4px 14px",
+                        fontSize: "0.72rem",
+                        color: "#64748B",
+                      }}
+                    >
+                      <span>
+                        <strong style={{ color: "#475569" }}>ID:</strong>{" "}
+                        {studentId}
+                      </span>
+                      <span>
+                        <strong style={{ color: "#475569" }}>Pickup:</strong>{" "}
+                        {pickupPoint}
+                      </span>
+                      <span>
+                        <strong style={{ color: "#475569" }}>Route:</strong>{" "}
+                        {selectedBus.routeName || "—"}
+                      </span>
+                      {dept !== "—" && (
+                        <span>
+                          <strong style={{ color: "#475569" }}>Dept:</strong>{" "}
+                          {dept}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <BoardingStatusBadge status={student.boardingStatus} />
+                </div>
+              );
+            })}
+          </div>
         )}
       </Modal>
     );
@@ -1220,6 +1636,7 @@ const Dashboard = () => {
           {modal === "alerts" && renderAlertsModal()}
           {modal === "students" && renderStudentsModal()}
           {modal === "notify" && renderNotifyModal()}
+          {selectedBus && renderBusStudentsModal()}
 
           {/* ── HEADER ── */}
           <div className="db-header">
@@ -1354,7 +1771,7 @@ const Dashboard = () => {
                   <div className="db-missing-emergency-sub">
                     {missingAlerts
                       .filter((m) => m.status === "ACTIVE")
-                      .map((m) => `${m.studentName} (Distance: ${m.distanceMeters}m from Bus ${m.vehicleNumber})`)
+                       .map((m) => `${m.studentName} — ${(m.studentBusDistance ?? m.distanceMeters)}m from Bus ${m.vehicleNumber} (proximity alert)`)
                       .join("  •  ")}
                   </div>
                 </div>
@@ -1595,20 +2012,137 @@ const Dashboard = () => {
               </div>
             )}
 
-            {/* ── Fallback when neither panel is visible ── */}
-            {!canSeeCard(user, "routeAlerts") && !canSeeCard(user, "studentsBoarded") && (
-              <div
-                className="db-panel"
-                style={{
-                  gridColumn: "1 / -1",
-                  textAlign: "center",
-                  color: "#94A3B8",
-                  padding: "40px 0",
-                }}
-              >
-                No panels available for your access level.
+            {/* ── Student Bus Loaded List ── */}
+            {(canSeeCard(user, "studentBusLoaded") || canSeeCard(user, "studentsBoarded")) && (
+              <div className="db-panel db-zone-panel db-bus-loaded-panel">
+                <div className="db-zone-panel-header">
+                  <h3 className="db-panel-title db-panel-title--blue">
+                    <BusFront size={18} /> Student Bus Loaded List
+                  </h3>
+                  <button
+                    onClick={() => navigate("/students")}
+                    className="db-details-btn"
+                  >
+                    Details
+                  </button>
+                </div>
+
+                <div className="db-zone-scroll db-bus-loaded-scroll">
+                  {loading ? (
+                    <div className="db-zone-loading">
+                      Loading student loading status…
+                    </div>
+                  ) : displayBusLoadedList.length === 0 ||
+                    (displayBusLoadedList.every((b) => (b.loaded ?? 0) === 0) &&
+                      (zoneBoarded.boarded ?? 0) === 0) ? (
+                    <div className="db-zone-empty-small db-bus-empty-state">
+                      <BusFront
+                        size={28}
+                        color="#94A3B8"
+                        className="db-bus-empty-icon"
+                      />
+                      <div className="db-bus-empty-title">
+                        No students boarded yet.
+                      </div>
+                      <div className="db-bus-empty-desc">
+                        Student boarding activity will appear here.
+                      </div>
+                    </div>
+                  ) : (
+                    displayBusLoadedList.map((bus, i) => {
+                      const assigned = bus.assigned ?? 0;
+                      const loaded = bus.loaded ?? 0;
+                      const remaining =
+                        bus.remaining ?? Math.max(0, assigned - loaded);
+                      const percentage =
+                        assigned > 0
+                          ? Math.round((loaded / assigned) * 100)
+                          : 0;
+                      const progressColor =
+                        percentage >= 100
+                          ? "#10B981"
+                          : percentage >= 50
+                            ? "#3B82F6"
+                            : percentage > 0
+                              ? "#F59E0B"
+                              : "#94A3B8";
+
+                      return (
+                        <div
+                          key={bus.id || bus.busNumber || i}
+                          className="db-bus-loaded-item db-bus-loaded-item--clickable"
+                          onClick={() => handleBusCardClick(bus)}
+                          title={`Click to view students assigned to Bus ${bus.busNumber}`}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") handleBusCardClick(bus);
+                          }}
+                        >
+                          <div className="db-bus-loaded-row-top">
+                            <div className="db-bus-loaded-left">
+                              <div className="db-bus-loaded-number">
+                                Bus {bus.busNumber}
+                              </div>
+                              <div className="db-bus-loaded-route">
+                                Route: {bus.routeName || "Unassigned"}
+                              </div>
+                            </div>
+                            <div className="db-bus-loaded-right">
+                              <span
+                                className="db-zone-percentage"
+                                style={{ color: progressColor }}
+                              >
+                                {percentage}%
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="db-zone-bar-track db-zone-bar-track--sm">
+                            <div
+                              className="db-zone-bar-fill"
+                              style={{
+                                width: `${percentage}%`,
+                                background: progressColor,
+                              }}
+                            />
+                          </div>
+
+                          <div className="db-bus-loaded-meta">
+                            <span className="db-bus-loaded-count">
+                              <strong>{loaded}</strong> / {assigned} Students Loaded
+                            </span>
+                            <span className="db-bus-loaded-remaining">
+                              {remaining} Remaining
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+                <p className="db-zone-footer-note">
+                  Live boarding status — <strong>Fleet-wide</strong> bus loading
+                </p>
               </div>
             )}
+
+            {/* ── Fallback when neither panel is visible ── */}
+            {!canSeeCard(user, "routeAlerts") &&
+              !canSeeCard(user, "studentsBoarded") &&
+              !canSeeCard(user, "studentBusLoaded") && (
+                <div
+                  className="db-panel"
+                  style={{
+                    gridColumn: "1 / -1",
+                    textAlign: "center",
+                    color: "#94A3B8",
+                    padding: "40px 0",
+                  }}
+                >
+                  No panels available for your access level.
+                </div>
+              )}
           </div>
 
           {canSeeCard(user, "map") && (
@@ -1637,9 +2171,17 @@ const Dashboard = () => {
                   zoom={12}
                   scrollWheelZoom={true}
                 >
-                  <TileLayer
+                  {/* <TileLayer
                     attribution="&copy; OpenStreetMap contributors"
                     url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                  /> */}
+                  {/* <TileLayer
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  /> */}
+                  <TileLayer
+                    attribution={import.meta.env.VITE_MAP_ATTRIBUTION}
+                    url={import.meta.env.VITE_MAP_TILE_URL}
                   />
                   {/* {gpsData.map((v) => { */}
                   {filteredGpsData.map((v) => {

@@ -22,12 +22,13 @@ export const SUPERADMIN_ONLY_ROUTES = ["/admins"];
 
 // Which permission unlocks which dashboard stat card / panel.
 export const PERMISSION_DASHBOARD_CARDS = {
-    vehicleManagement: ["activeVehicles", "map", "liveTransit"],
-    vehicleManagementAssignedOnly: ["activeVehicles", "map", "liveTransit"],
+    vehicleManagement: ["activeVehicles", "map", "liveTransit", "studentBusLoaded"],
+    vehicleManagementAssignedOnly: ["activeVehicles", "map", "liveTransit", "studentBusLoaded"],
     driverStaffManagement: ["activeDrivers"],
     maintenanceManagement: ["systemIssues"],
     routeManagement: ["routeAlerts", "alertsRaised", "notifyButton"],
-    zoneAttendanceMonitor: ["studentsBoarded"],
+    zoneAttendanceMonitor: ["studentsBoarded", "studentBusLoaded"],
+    studentManagement: ["studentBusLoaded", "studentsBoarded"],
 };
 
 // ── Sector defaults ──────────────────────────────────────────────────────

@@ -622,12 +622,12 @@ const AssignedMembersSection = ({ vehicle, onViewAll, onRemoveMember }) => {
                         <td className="vf-td-id">
                           {(s.studentId || s.id || "").slice(0, 8)}…
                         </td>
-                        <td>{s.class || "—"}</td>
-                        <td>{s.pickupPoint || "—"}</td>
+                        <td>{s.class || s.department || "—"}</td>
+                        <td>{s.pickupPoint || s.location || "—"}</td>
                         <td>
                           <button
                             onClick={() =>
-                              onRemoveMember(vehicle.id, "student", s.studentId)
+                              onRemoveMember(vehicle.id, "student", s.studentId || s.id)
                             }
                             className="vf-td-remove"
                           >
@@ -673,16 +673,16 @@ const ViewAllModal = ({ members, onClose, onRemove }) => {
       : []),
     ...members.coordinators.map((c) => ({
       type: "coordinator",
-      id: c.coordinatorId,
+      id: c.coordinatorId || c.id,
       name: c.name,
       sub: c.phone,
     })),
     ...members.students.map((s) => ({
       type: "student",
-      id: s.studentId,
+      id: s.studentId || s.id,
       name: s.name,
-      sub: s.class,
-      extra: s.pickupPoint,
+      sub: s.class || s.department || "—",
+      extra: s.pickupPoint || s.location || "—",
     })),
   ];
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { GraduationCap, Plus, Edit, Trash2, Info, X, Eye, EyeOff } from "lucide-react";
+import { GraduationCap, Plus, Edit, Trash2, Info, X, Eye, EyeOff, BusFront, AlertTriangle, MapPin } from "lucide-react";
 import Sidebar from "../../components/Sidebar";
 import Topbar from "../../components/Topbar";
 import { fetchUsers, createUser, fetchVehicles, updateUser, assignStudentBus, socket, deleteUser } from "../../api";
@@ -29,9 +29,37 @@ const Students = () => {
   const [showDetailPassword, setShowDetailPassword] = useState(true);
   const [showStudentModalPassword, setShowStudentModalPassword] = useState(false);
 
+  // Transport details modal form states
+  const [selectedVehicleId, setSelectedVehicleId] = useState("");
+  const [pickupPoint, setPickupPoint] = useState("");
+
   const mapUserToRow = (user, extras = {}) => {
     const rawImage = user.image || null;
     const image = user.image || `https://i.pravatar.cc/150?u=${user.id}`;
+    const assignedVehicle =
+      (user.vehicles && user.vehicles[0]) ||
+      (user.studentAssignments && user.studentAssignments[0]?.vehicle) ||
+      null;
+    const vehicleNumber =
+      user.vehicleNumber ||
+      assignedVehicle?.number ||
+      (user.vehicle && user.vehicle !== "Not Assigned" ? user.vehicle : null);
+    const vehicleId =
+      user.vehicleId ||
+      assignedVehicle?.id ||
+      (user.studentAssignments && user.studentAssignments[0]?.vehicleId) ||
+      null;
+    const route =
+      user.route ||
+      assignedVehicle?.route ||
+      (user.studentAssignments && user.studentAssignments[0]?.vehicle?.route) ||
+      null;
+    const studentPickupPoint =
+      user.pickupPoint ||
+      (user.studentAssignments && user.studentAssignments[0]?.pickupPoint) ||
+      user.location ||
+      "";
+
     return {
       id: user.id,
       name: user.name,
@@ -39,7 +67,11 @@ const Students = () => {
       email: user.email || "N/A",
       image,
       rawImage,
-      bus: user.vehicle || "Not Assigned",
+      bus: vehicleNumber || "Not Assigned",
+      vehicleId: vehicleId,
+      vehicleNumber: vehicleNumber || "Not Assigned",
+      route: route || "Not Assigned",
+      pickupPoint: studentPickupPoint,
       payment: user.paymentStatus || "Pending",
       isOnline: !!user.isOnline,
       lastSeenAt: user.lastSeenAt || null,
@@ -52,6 +84,11 @@ const Students = () => {
           currentYear: user.year || "N/A",
           residentialAddress: user.homeAddress || "N/A",
         },
+        transportInfo: {
+          assignedBus: vehicleNumber || "Not Assigned",
+          route: route || "Not Assigned",
+          pickupPoint: studentPickupPoint || "N/A",
+        },
         paymentInfo: {
           lastPaymentDate: "N/A",
           totalAmountPaid: "N/A",
@@ -60,7 +97,6 @@ const Students = () => {
         },
         loginId: user.loginId || user.email || "N/A",
         password: extras.password || user.password || user.plainPassword || "",
-        // image,
         image: rawImage,
       },
     };
@@ -78,10 +114,24 @@ const Students = () => {
     }
   };
 
+  const loadVehicles = async () => {
+    try {
+      const buses = await fetchVehicles();
+      setVehicles(buses);
+    } catch (error) {
+      console.error("Error loading vehicles:", error);
+    }
+  };
+
   useEffect(() => {
     loadStudents();
+    loadVehicles();
 
-    const refresh = () => loadStudents();
+    const refresh = () => {
+      loadStudents();
+      loadVehicles();
+    };
+
     socket.on("studentLocationUpdate", refresh);
     socket.on("studentTransitCompleted", refresh);
     socket.on("attendance_scanned", refresh);
@@ -103,23 +153,17 @@ const Students = () => {
       .replace(/^./, (str) => str.toUpperCase());
   };
 
-  const loadVehicles = async () => {
-    try {
-      const buses = await fetchVehicles();
-      setVehicles(buses);
-    } catch (error) {
-      console.error("Error loading vehicles:", error);
-    }
-  };
-
-  useEffect(() => {
-    loadVehicles();
-  }, []);
+  // Find currently selected vehicle in modal
+  const selectedVehicle =
+    vehicles.find(
+      (v) => v.id === selectedVehicleId || (v.number && v.number === selectedVehicleId)
+    ) || null;
 
   const handleSave = async (e) => {
     e.preventDefault();
     const formData = new FormData(e.target);
-    const busSelection = formData.get("bus");
+    const busSelection = selectedVehicleId || "Not Assigned";
+    const pickupLocation = formData.get("pickupPoint") || pickupPoint || "";
 
     if (editStudent) {
       try {
@@ -131,11 +175,14 @@ const Students = () => {
           phone: formData.get("phone"),
           rollNumber: formData.get("rollNumber"),
           homeAddress: formData.get("address"),
+          location: pickupLocation || undefined,
+          pickupPoint: pickupLocation || undefined,
+          vehicleIds: selectedVehicleId ? [selectedVehicleId] : [],
           image: imagePreview || undefined,
         };
 
         await updateUser(editStudent.id, payload);
-        await assignStudentBus(editStudent.id, busSelection);
+        await assignStudentBus(editStudent.id, busSelection, pickupLocation);
 
         const [freshStudents] = await Promise.all([
           fetchUsers("student"),
@@ -145,7 +192,12 @@ const Students = () => {
         socket.emit("vehicleMembersUpdated", {});
 
         const mapped = freshStudents.map((s) =>
-          mapUserToRow(s, s.id === editStudent.id ? { password: formData.get("password") || editStudent.details.password } : {})
+          mapUserToRow(
+            s,
+            s.id === editStudent.id
+              ? { password: formData.get("password") || editStudent.details.password }
+              : {}
+          )
         );
         setData(mapped);
         setSelectedStudent(mapped.find((s) => s.id === editStudent.id) || null);
@@ -167,11 +219,14 @@ const Students = () => {
           paymentStatus: formData.get("payment"),
           rollNumber: formData.get("rollNumber"),
           homeAddress: formData.get("address"),
+          location: pickupLocation || undefined,
+          pickupPoint: pickupLocation || undefined,
+          vehicleIds: selectedVehicleId ? [selectedVehicleId] : [],
           image: imagePreview || undefined,
         };
 
         const createdStudent = await createUser(payload);
-        await assignStudentBus(createdStudent.id, busSelection);
+        await assignStudentBus(createdStudent.id, busSelection, pickupLocation);
 
         const [freshStudents] = await Promise.all([
           fetchUsers("student"),
@@ -181,7 +236,12 @@ const Students = () => {
         socket.emit("vehicleMembersUpdated", {});
 
         const mapped = freshStudents.map((s) =>
-          mapUserToRow(s, s.id === createdStudent.id ? { password: formData.get("password") } : {})
+          mapUserToRow(
+            s,
+            s.id === createdStudent.id
+              ? { password: formData.get("password") }
+              : {}
+          )
         );
         setData(mapped);
         setSelectedStudent(mapped.find((s) => s.id === createdStudent.id) || null);
@@ -194,15 +254,30 @@ const Students = () => {
 
     setShowAddModal(false);
     setEditStudent(null);
+    setSelectedVehicleId("");
+    setPickupPoint("");
   };
 
-  const getAssignedBus = (studentId) => {
-    const match = vehicles.find(
-      (v) =>
-        v.studentIds?.includes(studentId) ||
-        v.assignedStudents?.some((s) => s.id === studentId),
-    );
-    return match?.number || "Not Assigned";
+  const openAddModal = () => {
+    setEditStudent(null);
+    setSelectedVehicleId("");
+    setPickupPoint("");
+    setImagePreview("");
+    setImageError("");
+    setShowAddModal(true);
+  };
+
+  const openEditModal = (user) => {
+    setEditStudent(user);
+    // Locate vehicle ID from existing vehicles list or user record
+    const matchingVehicle =
+      vehicles.find((v) => v.id === user.vehicleId || v.number === user.bus) || null;
+    setSelectedVehicleId(matchingVehicle ? matchingVehicle.id : (user.vehicleId || ""));
+    setPickupPoint(user.pickupPoint || "");
+    const existingImage = user.rawImage || user.details?.image || "";
+    setImagePreview(existingImage);
+    setImageError("");
+    setShowAddModal(true);
   };
 
   const confirmDeleteStudent = async () => {
@@ -219,23 +294,6 @@ const Students = () => {
     }
   };
 
-  const handleMarkPaid = async (student) => {
-    try {
-      await updateUser(student.id, { paymentStatus: "Paid" });
-
-      setData((prev) =>
-        prev.map((s) => (s.id === student.id ? { ...s, payment: "Paid" } : s))
-      );
-
-      setSelectedStudent((prev) =>
-        prev?.id === student.id ? { ...prev, payment: "Paid" } : prev
-      );
-    } catch (error) {
-      console.error("Error updating payment status:", error);
-      alert(error.message || "Unable to update payment status.");
-    }
-  };
-
   return (
     <div className="dashboard-layout">
       <Sidebar />
@@ -247,12 +305,7 @@ const Students = () => {
             <h1>Student Management</h1>
             <button
               className="btn btn-primary student-btn-add"
-              onClick={() => {
-                setEditStudent(null);
-                setImagePreview("");
-                setImageError("");
-                setShowAddModal(true);
-              }}
+              onClick={openAddModal}
             >
               <Plus size={18} /> Add Student
             </button>
@@ -326,24 +379,6 @@ const Students = () => {
 
                     <div className="student-form-row">
                       <div className="student-field">
-                        <label>Assigned Bus</label>
-                        <select
-                          name="bus"
-                          defaultValue={editStudent?.bus || ""}
-                          required
-                        >
-                          <option value="" disabled>
-                            Select a bus
-                          </option>
-                          <option value="Not Assigned">Not Assigned</option>
-                          {vehicles.map((v) => (
-                            <option key={v.id} value={v.number || v.name}>
-                              {v.number || v.name} {v.route ? `- ${v.route}` : ""}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="student-field">
                         <label>Year</label>
                         <input
                           name="year"
@@ -355,10 +390,22 @@ const Students = () => {
                           required
                         />
                       </div>
+                      <div className="student-field">
+                        <label>Payment Status</label>
+                        <select
+                          name="payment"
+                          defaultValue={editStudent?.payment || "Pending"}
+                          required
+                        >
+                          <option value="Paid">Paid</option>
+                          <option value="Pending">Pending</option>
+                          <option value="Issue">Issue</option>
+                        </select>
+                      </div>
                     </div>
 
                     <div className="student-field">
-                      <label>Address</label>
+                      <label>Residential Address</label>
                       <input
                         name="address"
                         type="text"
@@ -371,37 +418,21 @@ const Students = () => {
                       />
                     </div>
 
-                    <div className="student-form-row">
-                      <div className="student-field">
-                        <label>Phone</label>
-                        <input
-                          name="phone"
-                          type="text"
-                          placeholder="e.g. 98765 43210"
-                          defaultValue={
-                            editStudent?.details?.studentInfo?.studentPhone ||
-                            ""
-                          }
-                          required
-                        />
-                      </div>
-                      <div className="student-field">
-                        <label>Payment Status</label>
-                        <select
-                          name="payment"
-                          // defaultValue={editStudent?.payment || "Paid"}
-                          defaultValue={editStudent?.payment || "Pending"}
-                          required
-                        >
-                          <option value="Paid">Paid</option>
-                          <option value="Pending">Pending</option>
-                          <option value="Issue">Issue</option>
-                        </select>
-                      </div>
+                    <div className="student-field">
+                      <label>Phone</label>
+                      <input
+                        name="phone"
+                        type="text"
+                        placeholder="e.g. 98765 43210"
+                        defaultValue={
+                          editStudent?.details?.studentInfo?.studentPhone || ""
+                        }
+                        required
+                      />
                     </div>
 
                     <div className="student-field">
-                      <label>Profile Image (JPG)</label>
+                      <label>Profile Image (JPG / PNG)</label>
                       <input
                         name="imageFile"
                         type="file"
@@ -410,19 +441,137 @@ const Students = () => {
                           const file = e.target.files[0];
                           if (!file) return;
                           setImageProcessing(true);
-                          handleImageChange(file, (val) => {
-                            setImagePreview(val);
-                            setImageProcessing(false);
-                          }, (err) => {
-                            setImageError(err);
-                            setImageProcessing(false);
-                          });
+                          handleImageChange(
+                            file,
+                            (val) => {
+                              setImagePreview(val);
+                              setImageProcessing(false);
+                            },
+                            (err) => {
+                              setImageError(err);
+                              setImageProcessing(false);
+                            }
+                          );
                         }}
                       />
-                      {imageError && <div style={{ color: "#DC2626", fontSize: 12, marginTop: 4 }}>{imageError}</div>}
-                      {imagePreview && (
-                        <img src={imagePreview} alt="Preview" style={{ width: 80, height: 80, borderRadius: "50%", objectFit: "cover", marginTop: 8, border: "1px solid #e2e8f0" }} />
+                      {imageError && (
+                        <div style={{ color: "#DC2626", fontSize: 12, marginTop: 4 }}>
+                          {imageError}
+                        </div>
                       )}
+                      {imagePreview && (
+                        <img
+                          src={imagePreview}
+                          alt="Preview"
+                          style={{
+                            width: 80,
+                            height: 80,
+                            borderRadius: "50%",
+                            objectFit: "cover",
+                            marginTop: 8,
+                            border: "1px solid #e2e8f0",
+                          }}
+                        />
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Transport Details Section */}
+                  <div className="student-form-section transport">
+                    <h3>
+                      <BusFront size={18} color="#9333EA" /> Transport Details
+                    </h3>
+
+                    <div className="student-form-row">
+                      <div className="student-field">
+                        <label>Bus / Vehicle</label>
+                        <select
+                          name="bus"
+                          value={selectedVehicleId}
+                          onChange={(e) => setSelectedVehicleId(e.target.value)}
+                        >
+                          <option value="">Not Assigned (No Transport)</option>
+                          {vehicles.map((v) => {
+                            const isMaintenance =
+                              v.status && v.status.toLowerCase() === "maintenance";
+                            const isInactive =
+                              v.status && v.status.toLowerCase() === "inactive";
+                            const studentCount =
+                              v.assignedStudents?.length || v.studentIds?.length || 0;
+                            const capacityText = v.capacity
+                              ? ` • ${studentCount}/${v.capacity} Seats`
+                              : "";
+                            const statusText = isMaintenance
+                              ? " [Maintenance]"
+                              : isInactive
+                              ? " [Inactive]"
+                              : "";
+                            const routeText = v.route
+                              ? ` • Route: ${v.route}`
+                              : " • No Route";
+
+                            return (
+                              <option key={v.id} value={v.id}>
+                                {v.number || v.name || "Unknown"} (
+                                {v.model || v.type || "Bus"}
+                                {capacityText}
+                                {statusText}
+                                {routeText})
+                              </option>
+                            );
+                          })}
+                        </select>
+                        {selectedVehicle && (
+                          <div className="student-field-hint">
+                            Vehicle ID: {selectedVehicle.id.substring(0, 8)}… •{" "}
+                            {selectedVehicle.model || selectedVehicle.type || "Bus"}
+                            {selectedVehicle.capacity
+                              ? ` • Capacity: ${selectedVehicle.capacity} seats`
+                              : ""}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="student-field">
+                        <label>Route</label>
+                        <input
+                          type="text"
+                          name="route"
+                          value={
+                            selectedVehicleId
+                              ? selectedVehicle?.route || "No Route Assigned"
+                              : "Not Assigned"
+                          }
+                          readOnly
+                          className="student-field-readonly"
+                          placeholder="Auto-assigned from vehicle"
+                        />
+                        {selectedVehicleId && !selectedVehicle?.route && (
+                          <div className="student-field-warning">
+                            <AlertTriangle size={14} />
+                            No route assigned to this vehicle in Vehicle Management
+                          </div>
+                        )}
+                        {selectedVehicle &&
+                          (selectedVehicle.status?.toLowerCase() === "maintenance" ||
+                            selectedVehicle.status?.toLowerCase() === "inactive") && (
+                            <div className="student-field-warning">
+                              <AlertTriangle size={14} />
+                              Vehicle status is currently {selectedVehicle.status}
+                            </div>
+                          )}
+                      </div>
+                    </div>
+
+                    <div className="student-field">
+                      <label>Pickup Point (Optional)</label>
+                      <input
+                        name="pickupPoint"
+                        type="text"
+                        placeholder="e.g. Guindy Bus Stand / Main Gate"
+                        value={pickupPoint}
+                        onChange={(e) => setPickupPoint(e.target.value)}
+                      />
                     </div>
                   </div>
 
@@ -452,11 +601,21 @@ const Students = () => {
                           />
                           <button
                             type="button"
-                            onClick={() => setShowStudentModalPassword(!showStudentModalPassword)}
+                            onClick={() =>
+                              setShowStudentModalPassword(!showStudentModalPassword)
+                            }
                             className="student-password-input-eye"
-                            title={showStudentModalPassword ? "Hide Password" : "Show Password"}
+                            title={
+                              showStudentModalPassword
+                                ? "Hide Password"
+                                : "Show Password"
+                            }
                           >
-                            {showStudentModalPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                            {showStudentModalPassword ? (
+                              <EyeOff size={16} />
+                            ) : (
+                              <Eye size={16} />
+                            )}
                           </button>
                         </div>
                       </div>
@@ -471,6 +630,8 @@ const Students = () => {
                     onClick={() => {
                       setShowAddModal(false);
                       setEditStudent(null);
+                      setSelectedVehicleId("");
+                      setPickupPoint("");
                     }}
                   >
                     Cancel
@@ -495,7 +656,7 @@ const Students = () => {
                   <tr>
                     <th>Student Name</th>
                     <th>Department</th>
-                    <th>Assigned Bus</th>
+                    <th>Assigned Bus & Route</th>
                     <th>Payment</th>
                     <th>Actions</th>
                   </tr>
@@ -503,7 +664,9 @@ const Students = () => {
                 <tbody>
                   {data.length === 0 ? (
                     <tr className="student-empty-row">
-                      <td colSpan={5}>No students found yet.</td>
+                      <td colSpan={5}>
+                        {loading ? "Loading students..." : "No students found yet."}
+                      </td>
                     </tr>
                   ) : (
                     data.map((user) => {
@@ -524,7 +687,12 @@ const Students = () => {
                           </td>
                           <td>{user.dept}</td>
                           <td className="student-bus-cell">
-                            {user.bus}
+                            <div style={{ fontWeight: 600 }}>{user.bus}</div>
+                            {user.route && user.route !== "Not Assigned" && (
+                              <div style={{ fontSize: "0.8rem", color: "#6b7280" }}>
+                                Route: {user.route}
+                              </div>
+                            )}
                           </td>
                           <td>
                             <span
@@ -545,11 +713,7 @@ const Students = () => {
                               className="student-action-btn student-action-edit"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setEditStudent(user);
-                                const existingImage = user.rawImage || user.details?.image || "";
-                                setImagePreview(existingImage);
-                                setImageError("");
-                                setShowAddModal(true);
+                                openEditModal(user);
                               }}
                             >
                               <Edit size={16} /> Edit
@@ -605,16 +769,29 @@ const Students = () => {
                   <span>{selectedStudent.email}</span>
                   <strong>Assigned Dept:</strong>
                   <span>{selectedStudent.dept}</span>
-                  <strong>Bus Route / Van:</strong>
-                  <span>{selectedStudent.bus}</span>
                   {Object.entries(selectedStudent.details.studentInfo).map(
                     ([key, value]) => (
                       <React.Fragment key={key}>
                         <strong>{formatKey(key)}:</strong>
                         <span>{value}</span>
                       </React.Fragment>
-                    ),
+                    )
                   )}
+
+                  {/* Transport Details Section */}
+                  <div className="student-detail-section-label transport">
+                    Transport Details
+                  </div>
+                  <strong>Bus / Vehicle:</strong>
+                  <span>
+                    {selectedStudent.bus ||
+                      selectedStudent.vehicleNumber ||
+                      "Not Assigned"}
+                  </span>
+                  <strong>Route:</strong>
+                  <span>{selectedStudent.route || "Not Assigned"}</span>
+                  <strong>Pickup Point:</strong>
+                  <span>{selectedStudent.pickupPoint || "Not Specified"}</span>
 
                   {/* Payment Details Section */}
                   <div className="student-detail-section-label payment">
@@ -635,7 +812,7 @@ const Students = () => {
                         <strong>{formatKey(key)}:</strong>
                         <span>{value}</span>
                       </React.Fragment>
-                    ),
+                    )
                   )}
 
                   {/* App Login Setup */}
@@ -651,15 +828,23 @@ const Students = () => {
                     {selectedStudent.details.password ? (
                       <>
                         <span className="student-detail-password-text">
-                          {showDetailPassword ? selectedStudent.details.password : "••••••••"}
+                          {showDetailPassword
+                            ? selectedStudent.details.password
+                            : "••••••••"}
                         </span>
                         <button
                           type="button"
                           onClick={() => setShowDetailPassword((prev) => !prev)}
                           className="student-password-toggle-btn"
-                          title={showDetailPassword ? "Hide Password" : "Show Password"}
+                          title={
+                            showDetailPassword ? "Hide Password" : "Show Password"
+                          }
                         >
-                          {showDetailPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                          {showDetailPassword ? (
+                            <EyeOff size={15} />
+                          ) : (
+                            <Eye size={15} />
+                          )}
                         </button>
                       </>
                     ) : (
