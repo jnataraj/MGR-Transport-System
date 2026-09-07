@@ -1,5 +1,6 @@
 const bcrypt = require("bcryptjs");
 const prisma = require("../prisma/prisma");
+const auditLogService = require("../services/auditLogService");
 
 const ADMIN_ROLE = "deptadmin";
 
@@ -91,6 +92,24 @@ exports.createAdmin = async (req, res) => {
             },
         });
 
+        await auditLogService.record({
+            req,
+            action: "ADMIN_CREATED",
+            eventType: "CREATE",
+            module: "USER_MANAGEMENT",
+            entityType: "ADMIN",
+            entityId: admin.id,
+            description: `Created admin account ${name} (Sector: ${sector || "General"}, Header: ${roleHeader || "Dept Admin"})`,
+            newValues: {
+                name,
+                email,
+                sector,
+                roleHeader,
+                employeeId,
+                permissions,
+            },
+        });
+
         res.status(201).json(formatAdmin(admin));
     } catch (err) {
         console.error("createAdmin error:", err);
@@ -121,6 +140,14 @@ exports.updateAdmin = async (req, res) => {
             status,
         } = req.body;
 
+        const previousAdmin = await prisma.user.findUnique({
+            where: { id },
+        });
+
+        if (!previousAdmin) {
+            return res.status(404).json({ error: "Admin not found" });
+        }
+
         let hashedPassword;
         if (password) {
             hashedPassword = await bcrypt.hash(password, 10);
@@ -146,6 +173,30 @@ exports.updateAdmin = async (req, res) => {
             },
         });
 
+        await auditLogService.record({
+            req,
+            action: "ADMIN_UPDATED",
+            eventType: "UPDATE",
+            module: "USER_MANAGEMENT",
+            entityType: "ADMIN",
+            entityId: id,
+            description: `Updated admin account ${admin.name}`,
+            oldValues: {
+                name: previousAdmin.name,
+                email: previousAdmin.email,
+                sector: previousAdmin.sector,
+                roleHeader: previousAdmin.roleHeader,
+                status: previousAdmin.status,
+            },
+            newValues: {
+                name: admin.name,
+                email: admin.email,
+                sector: admin.sector,
+                roleHeader: admin.roleHeader,
+                status: admin.status,
+            },
+        });
+
         res.json(formatAdmin(admin));
     } catch (err) {
         console.error("updateAdmin error:", err);
@@ -165,7 +216,29 @@ exports.updateAdmin = async (req, res) => {
 exports.deleteAdmin = async (req, res) => {
     try {
         const { id } = req.params;
+        const existing = await prisma.user.findUnique({ where: { id } });
+        if (!existing) {
+            return res.status(404).json({ error: "Admin not found" });
+        }
+
         await prisma.user.delete({ where: { id } });
+
+        await auditLogService.record({
+            req,
+            action: "ADMIN_DELETED",
+            eventType: "DELETE",
+            module: "USER_MANAGEMENT",
+            entityType: "ADMIN",
+            entityId: id,
+            description: `Deleted admin account ${existing.name} (${existing.email})`,
+            oldValues: {
+                id: existing.id,
+                name: existing.name,
+                email: existing.email,
+                sector: existing.sector,
+            },
+        });
+
         res.json({ success: true });
     } catch (err) {
         console.error("deleteAdmin error:", err);
@@ -174,4 +247,4 @@ exports.deleteAdmin = async (req, res) => {
         }
         res.status(500).json({ error: "Failed to delete admin" });
     }
-};
+};

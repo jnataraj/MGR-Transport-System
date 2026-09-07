@@ -1,5 +1,7 @@
 const prisma = require("../prisma/prisma");
 const { triggerNotification } = require("../utils/notification");
+const auditLogService = require("../services/auditLogService");
+
 
 // GET /api/bus-change  (optional ?vehicleId=&routeId=)
 exports.getBusChanges = async (req, res) => {
@@ -117,8 +119,33 @@ exports.createBusChange = async (req, res) => {
                 }
             }
 
+            await auditLogService.record({
+                req,
+                action: "ROUTE_VEHICLE_SWAPPED",
+                eventType: "UPDATE",
+                module: "ROUTE_VEHICLE_SWAP",
+                entityType: "VEHICLE",
+                entityId: newVehicleId,
+                description: `Vehicle swapped on route "${routeName || "Custom"}": ${oldVehicleNumber} → ${newVehicleNumber}. Reason: ${reason || "Not specified"}`,
+                oldValues: {
+                    vehicleId: oldVehicleId,
+                    vehicleNumber: oldVehicleNumber,
+                    routeId,
+                    routeName,
+                },
+                newValues: {
+                    vehicleId: newVehicleId,
+                    vehicleNumber: newVehicleNumber,
+                    routeId,
+                    routeName,
+                    reason,
+                },
+                tx,
+            });
+
             return log;
         });
+
 
         const io = req.app.get("io");
         const oldUserIds = await getAssignedUserIds(oldVehicleId);

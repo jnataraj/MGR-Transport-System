@@ -1,5 +1,7 @@
 const prisma = require("../prisma/prisma");
 const { triggerNotification } = require("../utils/notification");
+const auditLogService = require("../services/auditLogService");
+
 
 // Resolve a vehicle by its number (dropdown sends the number, e.g. "TN-01-AA-1234")
 const resolveVehicle = async (vehicleNumberOrId) => {
@@ -189,6 +191,23 @@ exports.createMaintenanceLog = async (req, res) => {
             notifyResults.targets.push("hod");
         }
 
+        await auditLogService.record({
+            req,
+            action: "MAINTENANCE_CREATED",
+            eventType: "CREATE",
+            module: "MAINTENANCE",
+            entityType: "MAINTENANCE_ALERT",
+            entityId: log.id,
+            description: `Raised maintenance alert for vehicle ${vehicleNumber}: ${issueType} (Priority: ${priority})`,
+            newValues: {
+                vehicle: vehicleNumber,
+                issueType,
+                priority,
+                description,
+                raisedBy,
+            },
+        });
+
         res.status(201).json({ log, notifyResults });
     } catch (err) {
         console.error("createMaintenanceLog error:", err);
@@ -211,6 +230,21 @@ exports.resolveMaintenanceLog = async (req, res) => {
             },
         });
 
+        await auditLogService.record({
+            req,
+            action: "MAINTENANCE_RESOLVED",
+            eventType: "STATUS_CHANGE",
+            module: "MAINTENANCE",
+            entityType: "MAINTENANCE_ALERT",
+            entityId: id,
+            description: `Resolved maintenance alert for vehicle ${log.vehicle}: ${log.issueType} by ${acknowledgedBy || "Maintenance Team"}`,
+            newValues: {
+                status: "Resolved",
+                resolvedAt: log.resolvedAt,
+                acknowledgedBy: log.acknowledgedBy,
+            },
+        });
+
         res.json(log);
     } catch (err) {
         console.error("resolveMaintenanceLog error:", err);
@@ -219,4 +253,4 @@ exports.resolveMaintenanceLog = async (req, res) => {
         }
         res.status(500).json({ error: "Failed to resolve maintenance log" });
     }
-};
+};

@@ -1,6 +1,8 @@
 const bcrypt = require("bcryptjs");
 const prisma = require("../prisma/prisma");
 const { isVehicleOnline, DEFAULT_TIMEOUT_MS } = require("../utils/vehicleLocationStore");
+const auditLogService = require("../services/auditLogService");
+
 
 const sanitizeUserData = async (data, { isUpdate = false } = {}) => {
   const {
@@ -69,7 +71,18 @@ const formatUser = (user) => {
     return assignedIds.some((id) => isVehicleOnline(id));
   })();
 
-  const primaryVehicle = vehicleList[0] || null;
+  const activeVehicles = vehicleList.filter(
+    (v) => !v.status || (v.status || "").toLowerCase() === "active"
+  );
+  const candidateVehicles = activeVehicles.length > 0 ? activeVehicles : vehicleList;
+  const primaryVehicle = [...candidateVehicles].sort((a, b) => {
+    const timeA = a.startTime || a.departureTime || a.start_time || a.time || "";
+    const timeB = b.startTime || b.departureTime || b.start_time || b.time || "";
+    if (timeA && timeB) return timeA.localeCompare(timeB);
+    if (timeA) return -1;
+    if (timeB) return 1;
+    return 0;
+  })[0] || null;
   const assignment = user.studentAssignments?.[0] || null;
 
   return {
@@ -87,7 +100,11 @@ const formatUser = (user) => {
 
     vehicleId: primaryVehicle?.id || null,
     vehicleNumber: primaryVehicle?.number || null,
-    route: primaryVehicle?.route || null,
+    route:
+      vehicleList.map((v) => v.route).filter(Boolean).join(", ") ||
+      primaryVehicle?.route ||
+      null,
+    routes: vehicleList.map((v) => v.route).filter(Boolean),
     pickupPoint: assignment?.pickupPoint || user.location || null,
 
     vehicleIds: vehicleList.map((v) => v.id),
@@ -499,6 +516,28 @@ const createUser = async (req, res) => {
       }
     });
 
+    const userRoleFormatted = (user.role || "USER").toUpperCase();
+    await auditLogService.record({
+      req,
+      action: `${userRoleFormatted}_CREATED`,
+      eventType: "CREATE",
+      module: "USER_MANAGEMENT",
+      entityType: userRoleFormatted,
+      entityId: user.id,
+      description: `Created ${user.role} user: ${user.name} (${user.email || user.rollNumber || user.id})`,
+      newValues: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        phone: user.phone,
+        status: user.status,
+        department: user.department,
+        rollNumber: user.rollNumber,
+        vehicles: vehicleIds,
+      },
+    });
+
     res.status(201).json(formatUser(updatedUser));
   } catch (err) {
     console.error(err);
@@ -513,6 +552,21 @@ const updateUser = async (req, res) => {
   try {
     const { id } = req.params;
     const data = req.body;
+
+    // Fetch previous state for oldValues diffing
+    const previousUser = await prisma.user.findUnique({
+      where: { id },
+      include: {
+        vehicles: true,
+        studentAssignments: {
+          include: { vehicle: true },
+        },
+      },
+    });
+
+    if (!previousUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
 
     // ── HoD department validation ──────────────────────────────────────────
     if (data.role?.toLowerCase() === "hod" && data.department !== undefined) {
@@ -556,7 +610,6 @@ const updateUser = async (req, res) => {
 
     const updatedUser = await prisma.user.findUnique({
       where: { id },
-      // include: { vehicles: true }
       include: {
         vehicles: true,
         studentAssignments: {
@@ -565,6 +618,35 @@ const updateUser = async (req, res) => {
           },
         },
       }
+    });
+
+    const userRoleFormatted = (updatedUser.role || "USER").toUpperCase();
+    await auditLogService.record({
+      req,
+      action: `${userRoleFormatted}_UPDATED`,
+      eventType: "UPDATE",
+      module: "USER_MANAGEMENT",
+      entityType: userRoleFormatted,
+      entityId: id,
+      description: `Updated ${updatedUser.role} user: ${updatedUser.name}`,
+      oldValues: {
+        name: previousUser.name,
+        email: previousUser.email,
+        role: previousUser.role,
+        status: previousUser.status,
+        phone: previousUser.phone,
+        department: previousUser.department,
+        location: previousUser.location,
+      },
+      newValues: {
+        name: updatedUser.name,
+        email: updatedUser.email,
+        role: updatedUser.role,
+        status: updatedUser.status,
+        phone: updatedUser.phone,
+        department: updatedUser.department,
+        location: updatedUser.location,
+      },
     });
 
     res.json(formatUser(updatedUser));
@@ -581,6 +663,14 @@ const updateUser = async (req, res) => {
 const deleteUser = async (req, res) => {
   try {
     const { id } = req.params;
+
+    const existingUser = await prisma.user.findUnique({
+      where: { id },
+    });
+
+    if (!existingUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
 
     await prisma.$transaction(async (tx) => {
       // If this user is a driver on any vehicle, unassign them first
@@ -600,6 +690,25 @@ const deleteUser = async (req, res) => {
       });
 
       await tx.user.delete({ where: { id } });
+
+      const roleFormatted = (existingUser.role || "USER").toUpperCase();
+      await auditLogService.record({
+        req,
+        action: `${roleFormatted}_DELETED`,
+        eventType: "DELETE",
+        module: "USER_MANAGEMENT",
+        entityType: roleFormatted,
+        entityId: id,
+        description: `Deleted ${existingUser.role} user: ${existingUser.name} (${existingUser.email || existingUser.rollNumber || id})`,
+        oldValues: {
+          id: existingUser.id,
+          name: existingUser.name,
+          email: existingUser.email,
+          role: existingUser.role,
+          phone: existingUser.phone,
+        },
+        tx,
+      });
     });
 
     res.json({ success: true });
@@ -611,6 +720,7 @@ const deleteUser = async (req, res) => {
     res.status(500).json({ error: "Failed to delete user" });
   }
 };
+
 
 module.exports = {
   getDepartments,

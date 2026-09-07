@@ -28,6 +28,7 @@ import logo from "../../assets/logo.png";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import BottomTabBar from "../components/BottomTabBar";
 import LiveBusTrackingModal from "../components/LiveBusTrackingModal";
+import StudentBusRouteChangeModal from "../components/StudentBusRouteChangeModal";
 import * as ImagePicker from "expo-image-picker";
 import jsQR from "jsqr";
 import { ProfileAvatar, avatarStyles } from "../screens/dashboard/modals/ProfileModal";
@@ -80,6 +81,7 @@ const STAGE_META = {
 // Quick-action theme palette
 const ACTION_THEMES = {
   qr: { bg: "#EFF6FF", fg: "#2563EB" },
+  change: { bg: "#F3E8FF", fg: "#8B5CF6" },
   history: { bg: "#FFF7ED", fg: "#F97316" },
   tracking: { bg: "#ECFDF5", fg: "#10B981" },
   alerts: { bg: "#FEF2F2", fg: "#EF4444" },
@@ -92,10 +94,60 @@ const mapBackendRole = (backendRole) => {
   return "student";
 };
 
+export const getActiveStudentBus = (u) => {
+  if (!u) return null;
+  let list = [];
+  if (Array.isArray(u.vehicles) && u.vehicles.length > 0) {
+    list = u.vehicles;
+  } else if (Array.isArray(u.studentAssignments) && u.studentAssignments.length > 0) {
+    list = u.studentAssignments.map((a) => ({
+      ...(a.vehicle || {}),
+      pickupPoint: a.pickupPoint,
+      assignedAt: a.assignedAt,
+    }));
+  } else if (u.vehicle && u.vehicle !== "Not Assigned") {
+    const numbers = String(u.vehicle).split(",").map((s) => s.trim()).filter(Boolean);
+    list = numbers.map((num) => ({
+      number: num,
+      route: u.route,
+      status: "active",
+    }));
+  }
+
+  if (list.length === 0) return null;
+
+  // Filter for active status
+  const activeVehicles = list.filter(
+    (v) => !v.status || (v.status || "").toLowerCase() === "active"
+  );
+  const candidateList = activeVehicles.length > 0 ? activeVehicles : list;
+
+  // Sort by earliest start time / assignedAt
+  const sorted = [...candidateList].sort((a, b) => {
+    const timeA = a.startTime || a.departureTime || a.start_time || a.time || "";
+    const timeB = b.startTime || b.departureTime || b.start_time || b.time || "";
+    if (timeA && timeB) return timeA.localeCompare(timeB);
+    if (timeA) return -1;
+    if (timeB) return 1;
+
+    if (a.assignedAt && b.assignedAt) {
+      return new Date(a.assignedAt) - new Date(b.assignedAt);
+    }
+    return 0;
+  });
+
+  return sorted[0] || null;
+};
+
 export default function MainDashboard({ user, token, onLogout }) {
   const [boardStatus, setBoardStatus] = useState(STAGE.PICKUP);
+
+  const activeStudentBus = getActiveStudentBus(user);
+  const primaryVehicleNumber = activeStudentBus?.number || (user?.vehicle ? String(user.vehicle).split(",")[0].trim() : "Not Assigned");
+  const primaryRoute = activeStudentBus?.route || (user?.route ? String(user.route).split(",")[0].trim() : "Not Assigned");
+
   const [currentVehicleNumber, setCurrentVehicleNumber] = useState(
-    user?.vehicle || null
+    primaryVehicleNumber || null
   );
   const inTransit = boardStatus === STAGE.TO_COLLEGE || boardStatus === STAGE.TO_HOME;
   // const [boardStatus, setBoardStatus] = useState("NOT_BOARDED");
@@ -124,6 +176,7 @@ export default function MainDashboard({ user, token, onLogout }) {
   const [hodTimeFilter, setHodTimeFilter] = useState("W");
   const [notifications, setNotifications] = useState([]);
   const [isBoardingQRModalOpen, setIsBoardingQRModalOpen] = useState(false);
+  const [isBusRouteChangeModalOpen, setIsBusRouteChangeModalOpen] = useState(false);
   // const [qrDirection, setQrDirection] = useState("COLLEGE_TO_INROUTE");
   const [activeTab, setActiveTab] = useState("home");
   const [showProfileModal, setShowProfileModal] = useState(false);
@@ -1480,6 +1533,51 @@ source: StudentApp-handleScanQR`);
               </View>
             )}
 
+            {/* Bus / Route Change */}
+            {userRole === "student" && (
+              <View style={{ width: "46%", position: "relative" }}>
+                <TouchableOpacity
+                  style={[styles.sqBtn, { alignItems: "flex-start" }]}
+                  onPress={() => setIsBusRouteChangeModalOpen(true)}
+                  activeOpacity={0.75}
+                >
+                  <View style={{ width: 48, height: 48, borderRadius: 15, backgroundColor: ACTION_THEMES.change.bg, alignItems: "center", justifyContent: "center" }}>
+                    <Shuffle size={24} color={ACTION_THEMES.change.fg} strokeWidth={2.2} />
+                  </View>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "flex-end",
+                      justifyContent: "space-between",
+                      width: "100%",
+                      marginTop: 8,
+                    }}
+                  >
+                    <Text style={styles.sqBtnText}>
+                      Bus / Route{"\n"}Change
+                    </Text>
+
+                    <View
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: 16,
+                        backgroundColor: ACTION_THEMES.change.bg,
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <ChevronRight
+                        size={17}
+                        color={ACTION_THEMES.change.fg}
+                        strokeWidth={2.5}
+                      />
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              </View>
+            )}
+
             {/* Travel History */}
             {!isHoD && (
               <View style={{ width: "46%", position: "relative" }}>
@@ -1669,20 +1767,21 @@ source: StudentApp-handleScanQR`);
                   </View>
                   {/* Bus number */}
                   <Text style={{ fontSize: 22, fontWeight: "900", color: "#FFFFFF", letterSpacing: 0.5 }} numberOfLines={1}>
-                    {/* {user?.vehicle} */}
-                    {currentVehicleNumber || user?.vehicle || "Not Assigned"}
+                    {primaryVehicleNumber}
                   </Text>
                   {/* Route */}
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 4 }}>
                     <MapPin size={11} color="#93C5FD" strokeWidth={2.4} />
                     <Text style={{ fontSize: 13, fontWeight: "700", color: "#BFDBFE" }} numberOfLines={1}>
-                      {user?.route}
+                      {primaryRoute}
                     </Text>
                   </View>
                   {/* Driver */}
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 6 }}>
                     <User size={11} color="#BFDBFE" strokeWidth={2.2} />
-                    <Text style={{ fontSize: 12, fontWeight: "600", color: "#DBEAFE" }}>Driver: {getDriverForVehicle(currentVehicleNumber) || "—"}</Text>
+                    <Text style={{ fontSize: 12, fontWeight: "600", color: "#DBEAFE" }}>
+                      Driver: {activeStudentBus?.driver?.name || getDriverForVehicle(primaryVehicleNumber) || user?.driverName || "—"}
+                    </Text>
                   </View>
                 </View>
                 {/* ON ROUTE pill */}
@@ -1897,6 +1996,11 @@ source: StudentApp-handleScanQR`);
             const childTrackFill = childActiveIdx === 0 ? "0%" : childActiveIdx === 1 ? "50%" : "100%";
             const childActiveColor = childMeta.color;
 
+            const activeChildBus = getActiveStudentBus(childProfile);
+            const childVehicleNum = activeChildBus?.number || (childProfile.vehicle ? String(childProfile.vehicle).split(",")[0].trim() : "Not Assigned");
+            const childRouteName = activeChildBus?.route || (childProfile.route ? String(childProfile.route).split(",")[0].trim() : "Not Assigned");
+            const childDriverName = activeChildBus?.driver?.name || childProfile.driverName || "—";
+
             return (
               <>
                 {/* ── Child Assigned Bus Card ── */}
@@ -1924,21 +2028,20 @@ source: StudentApp-handleScanQR`);
                       </View>
                       {/* Bus number */}
                       <Text style={{ fontSize: 22, fontWeight: "900", color: "#FFFFFF", letterSpacing: 0.5 }} numberOfLines={1}>
-                        {childProfile.vehicle}
-                        {/* {user?.vehicle} */}
+                        {childVehicleNum}
                       </Text>
                       {/* Route */}
                       <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 4 }}>
                         <MapPin size={11} color="#93C5FD" strokeWidth={2.4} />
                         <Text style={{ fontSize: 13, fontWeight: "700", color: "#BFDBFE" }} numberOfLines={1}>
-                          {childProfile.route}
+                          {childRouteName}
                         </Text>
                       </View>
                       {/* Driver */}
                       <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 6 }}>
                         <User size={11} color="#BFDBFE" strokeWidth={2.2} />
                         <Text style={{ fontSize: 12, fontWeight: "600", color: "#DBEAFE" }}>
-                          Driver: {childProfile.driverName || "—"}
+                          Driver: {childDriverName}
                         </Text>
                       </View>
                       {childProfile.pickupTime && (
@@ -3550,6 +3653,22 @@ source: StudentApp-handleScanQR`);
           userRole={userRole}
         />
       )}
+
+      {/* ── Student Bus / Route Change Modal ── */}
+      <StudentBusRouteChangeModal
+        visible={isBusRouteChangeModalOpen}
+        onClose={() => setIsBusRouteChangeModalOpen(false)}
+        token={token}
+        user={user}
+        onSuccessChange={(res) => {
+          if (res?.newBusNumber) {
+            setCurrentVehicleNumber(res.newBusNumber);
+          }
+          if (refreshProfile) {
+            refreshProfile();
+          }
+        }}
+      />
     </>
   );
 }

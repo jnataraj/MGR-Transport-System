@@ -8,6 +8,8 @@ const {
   updateStudentLocation,
   updateDriverLocation,
 } = require("../services/missingAlertService");
+const auditLogService = require("../services/auditLogService");
+
 
 exports.recordAttendance = async (req, res) => {
   try {
@@ -459,6 +461,46 @@ timestamp: ${now.toISOString()}`);
       }
     }
 
+    // Record central audit log for attendance/boarding action
+    const auditAction = userRole.includes("student")
+      ? "STUDENT_BOARDED"
+      : userRole.includes("driver")
+        ? (stage === "STARTED" ? "TRIP_STARTED" : stage === "CLOSED" ? "TRIP_ENDED" : "ATTENDANCE_MARKED")
+        : "ATTENDANCE_MARKED";
+
+    await auditLogService.record({
+      req,
+      userId: user.id,
+      userRole: user.role,
+      userName: user.name,
+      action: auditAction,
+      eventType: "ACTION",
+      module: "ATTENDANCE",
+      entityType: userRole.includes("student") ? "STUDENT" : "VEHICLE",
+      entityId: userRole.includes("student") ? user.id : (vehicleRecord?.id || targetVehicle),
+      description: `${user.name} (${user.role}) recorded attendance on Bus ${vehicleRecord?.number || targetVehicle} [Stage: ${stage || "Default"}]`,
+      latitude: latitude != null ? parseFloat(latitude) : (vehicleLoc?.latitude ?? null),
+      longitude: longitude != null ? parseFloat(longitude) : (vehicleLoc?.longitude ?? null),
+      gpsAccuracy: req.body.accuracy || req.body.gpsAccuracy || null,
+      gpsTimestamp: req.body.gpsTimestamp || req.body.timestamp || now,
+      vehicleId: vehicleRecord?.id || targetVehicle,
+      vehicleNumber: vehicleRecord?.number || targetVehicle,
+      studentId: userRole.includes("student") ? user.id : null,
+      driverId: userRole.includes("driver") ? user.id : (vehicleRecord?.driverId || null),
+      routeId: vehicleRecord?.route || null,
+      routeName: vehicleRecord?.route || null,
+      appName: userRole.includes("driver") ? "OFFICER_APP" : userRole.includes("student") ? "STUDENT_PARENT_APP" : undefined,
+      metadata: {
+        attendanceId: attendance.id,
+        vehicleId: targetVehicle,
+        vehicleNumber: vehicleRecord?.number || targetVehicle,
+        stage,
+        type: scanType,
+        direction,
+        distanceMeters: typeof distanceMeters !== "undefined" ? distanceMeters : null,
+      },
+    });
+
     return res.status(201).json({
       success: true,
       message: `${user.name} (${user.role.toUpperCase()}) marked ${stageLabel(stage)}`,
@@ -466,6 +508,7 @@ timestamp: ${now.toISOString()}`);
       autoEnrolled: rosterChanged,
       vehicleLocation: vehicleLoc,
     });
+
   } catch (error) {
     console.error("recordAttendance Error:", error);
     return res.status(500).json({ success: false, message: error.message || "Failed to record attendance" });

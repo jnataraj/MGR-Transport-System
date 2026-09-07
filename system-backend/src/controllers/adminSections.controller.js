@@ -1,4 +1,5 @@
 const prisma = require("../prisma/prisma");
+const auditLogService = require("../services/auditLogService");
 
 const formatSection = (section, adminCountMap = {}) => ({
     id: section.id,
@@ -53,6 +54,18 @@ exports.createSection = async (req, res) => {
             data: { name: name.trim(), color: color || "#3B82F6" },
             include: { incharge: true },
         });
+
+        await auditLogService.record({
+            req,
+            action: "SECTION_CREATED",
+            eventType: "CREATE",
+            module: "USER_MANAGEMENT",
+            entityType: "ADMIN_SECTION",
+            entityId: section.id,
+            description: `Created admin section "${section.name}"`,
+            newValues: { name: section.name, color: section.color },
+        });
+
         res.status(201).json(formatSection(section));
     } catch (err) {
         console.error("createSection error:", err);
@@ -71,6 +84,11 @@ exports.updateSection = async (req, res) => {
         const { id } = req.params;
         const { name, inchargeId } = req.body;
 
+        const previous = await prisma.adminSection.findUnique({ where: { id } });
+        if (!previous) {
+            return res.status(404).json({ error: "Section not found" });
+        }
+
         const section = await prisma.adminSection.update({
             where: { id },
             data: {
@@ -79,6 +97,19 @@ exports.updateSection = async (req, res) => {
             },
             include: { incharge: true },
         });
+
+        await auditLogService.record({
+            req,
+            action: "SECTION_UPDATED",
+            eventType: "UPDATE",
+            module: "USER_MANAGEMENT",
+            entityType: "ADMIN_SECTION",
+            entityId: id,
+            description: `Updated admin section "${section.name}"`,
+            oldValues: { name: previous.name, inchargeId: previous.inchargeId },
+            newValues: { name: section.name, inchargeId: section.inchargeId },
+        });
+
         res.json(formatSection(section));
     } catch (err) {
         console.error("updateSection error:", err);
@@ -93,7 +124,24 @@ exports.updateSection = async (req, res) => {
 exports.deleteSection = async (req, res) => {
     try {
         const { id } = req.params;
+        const existing = await prisma.adminSection.findUnique({ where: { id } });
+        if (!existing) {
+            return res.status(404).json({ error: "Section not found" });
+        }
+
         await prisma.adminSection.delete({ where: { id } });
+
+        await auditLogService.record({
+            req,
+            action: "SECTION_DELETED",
+            eventType: "DELETE",
+            module: "USER_MANAGEMENT",
+            entityType: "ADMIN_SECTION",
+            entityId: id,
+            description: `Deleted admin section "${existing.name}"`,
+            oldValues: { name: existing.name },
+        });
+
         res.json({ success: true });
     } catch (err) {
         console.error("deleteSection error:", err);
@@ -118,6 +166,18 @@ exports.setIncharge = async (req, res) => {
             data: { inchargeId: userId },
             include: { incharge: true },
         });
+
+        await auditLogService.record({
+            req,
+            action: "SECTION_INCHARGE_ASSIGNED",
+            eventType: "UPDATE",
+            module: "USER_MANAGEMENT",
+            entityType: "ADMIN_SECTION",
+            entityId: id,
+            description: `Assigned incharge ${section.incharge?.name || userId} to section "${section.name}"`,
+            metadata: { sectionId: id, inchargeId: userId },
+        });
+
         res.json(formatSection(section));
     } catch (err) {
         console.error("setIncharge error:", err);
@@ -134,9 +194,20 @@ exports.removeIncharge = async (req, res) => {
             data: { inchargeId: null },
             include: { incharge: true },
         });
+
+        await auditLogService.record({
+            req,
+            action: "SECTION_INCHARGE_REMOVED",
+            eventType: "UPDATE",
+            module: "USER_MANAGEMENT",
+            entityType: "ADMIN_SECTION",
+            entityId: id,
+            description: `Removed incharge from section "${section.name}"`,
+        });
+
         res.json(formatSection(section));
     } catch (err) {
         console.error("removeIncharge error:", err);
         res.status(500).json({ error: "Failed to remove incharge" });
     }
-};
+};

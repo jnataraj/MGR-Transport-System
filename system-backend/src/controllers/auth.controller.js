@@ -1,6 +1,7 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const prisma = require("../prisma/prisma.js");
+const auditLogService = require("../services/auditLogService");
 
 exports.register = async (req, res) => {
   try {
@@ -31,6 +32,20 @@ exports.register = async (req, res) => {
       },
     });
 
+    await auditLogService.record({
+      req,
+      userId: user.id,
+      userRole: user.role,
+      userName: user.name,
+      action: "USER_REGISTERED",
+      eventType: "CREATE",
+      module: "AUTH",
+      entityType: "USER",
+      entityId: user.id,
+      description: `New user ${user.name} registered with role ${user.role}`,
+      newValues: { id: user.id, name: user.name, email: user.email, role: user.role },
+    });
+
     res.status(201).json({
       success: true,
       message: "User Registered Successfully",
@@ -45,6 +60,7 @@ exports.register = async (req, res) => {
     });
   }
 };
+
 
 const resolveUserRoute = async (assignedVehicle, userId) => {
   let vehicle = assignedVehicle;
@@ -105,10 +121,29 @@ const resolveVehicleForUser = async (user) => {
   }
 
   if (role === "student") {
-    // Always read from VehicleStudentAssignment — the same table the admin
-    // dashboard uses via getAssignedBus(). This guarantees both views agree
-    // after any reassignment without requiring a logout/login cycle.
-    return user.studentAssignments?.[0]?.vehicle || null;
+    const assignedVehicles = (user.studentAssignments || [])
+      .map((assignment) => assignment.vehicle)
+      .filter(Boolean);
+
+    if (assignedVehicles.length === 0) return null;
+
+    // Prioritize active status
+    const activeVehicles = assignedVehicles.filter(
+      (v) => !v.status || (v.status || "").toLowerCase() === "active"
+    );
+    const candidates = activeVehicles.length > 0 ? activeVehicles : assignedVehicles;
+
+    // Sort by earliest starting time
+    const sorted = [...candidates].sort((a, b) => {
+      const timeA = a.startTime || a.departureTime || a.start_time || a.time || "";
+      const timeB = b.startTime || b.departureTime || b.start_time || b.time || "";
+      if (timeA && timeB) return timeA.localeCompare(timeB);
+      if (timeA) return -1;
+      if (timeB) return 1;
+      return 0;
+    });
+
+    return sorted[0] || null;
   }
 
   return null;
@@ -188,6 +223,16 @@ exports.login = async (req, res) => {
 
     // User not found
     if (!user) {
+      await auditLogService.record({
+        req,
+        action: "LOGIN_FAILED",
+        eventType: "AUTH",
+        module: "AUTH",
+        status: "FAILED",
+        failureReason: `User not found: ${normalizedEmail}`,
+        description: `Failed login attempt for nonexistent user ${normalizedEmail}`,
+      });
+
       return res.status(404).json({
         success: false,
         message: "User Not Found",
@@ -207,6 +252,21 @@ exports.login = async (req, res) => {
     }
 
     if (!isPasswordCorrect) {
+      await auditLogService.record({
+        req,
+        userId: user.id,
+        userRole: user.role,
+        userName: user.name,
+        action: "LOGIN_FAILED",
+        eventType: "AUTH",
+        module: "AUTH",
+        entityType: "USER",
+        entityId: user.id,
+        status: "FAILED",
+        failureReason: "Invalid Password",
+        description: `Failed login attempt for user ${user.name} (${user.email}) - Invalid password`,
+      });
+
       return res.status(401).json({
         success: false,
         message: "Invalid Password",
@@ -221,6 +281,21 @@ exports.login = async (req, res) => {
     // they must always be able to log in regardless of their current status.
     // Only block non-driver accounts that are not "active".
     if (userRole !== "driver" && status !== "active") {
+      await auditLogService.record({
+        req,
+        userId: user.id,
+        userRole: user.role,
+        userName: user.name,
+        action: "LOGIN_FAILED",
+        eventType: "AUTH",
+        module: "AUTH",
+        entityType: "USER",
+        entityId: user.id,
+        status: "FAILED",
+        failureReason: `Account status is ${user.status}`,
+        description: `Blocked login attempt for ${user.name} because account is ${user.status}`,
+      });
+
       return res.status(403).json({
         success: false,
         message: `Account is ${user.status}. Contact your administrator.`,
@@ -258,8 +333,27 @@ exports.login = async (req, res) => {
         phone: v.driver.phone || null,
       }));
 
+    // Audit login success
+    await auditLogService.record({
+      req,
+      userId: user.id,
+      userRole: user.role,
+      userName: user.name,
+      action: "LOGIN_SUCCESS",
+      eventType: "AUTH",
+      module: "AUTH",
+      entityType: "USER",
+      entityId: user.id,
+      description: `User ${user.name} (${user.role}) logged in successfully`,
+      metadata: {
+        vehicleAssigned: vehicleObj?.number || null,
+        routeAssigned: assignedRoute || null,
+      },
+    });
+
     // Login success
     return res.status(200).json({
+
       success: true,
       token,
       user: {

@@ -13,6 +13,7 @@ import {
   Crown,
   ArrowLeftRight,
   Bell,
+  FileText,
 } from "lucide-react";
 import { AuthContext } from "../context/AuthContext";
 import { canAccessPath } from "../pages/config/permissions/permissions";
@@ -60,10 +61,16 @@ const NAV_SECTIONS = [
         name: "Bus Change",
         icon: <ArrowLeftRight size={20} />,
       },
+      {
+        path: "/audit-logs",
+        name: "Audit Log",
+        icon: <FileText size={20} />,
+      },
       { path: "/settings", name: "Settings", icon: <Settings size={20} /> },
     ],
   },
 ];
+
 
 const Sidebar = () => {
   const { user } = useContext(AuthContext);

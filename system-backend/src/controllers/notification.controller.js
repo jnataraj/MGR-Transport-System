@@ -5,6 +5,7 @@ const {
   getActiveMissingAlerts,
   closeAlertById,
 } = require("../services/missingAlertService");
+const auditLogService = require("../services/auditLogService");
 
 // Save/Update user's Expo Push Token
 exports.savePushToken = async (req, res) => {
@@ -55,6 +56,17 @@ exports.sendNotification = async (req, res) => {
       data,
     });
 
+    await auditLogService.record({
+      req,
+      action: "NOTIFICATION_SENT",
+      eventType: "ACTION",
+      module: "ALERTS",
+      entityType: "NOTIFICATION",
+      entityId: notification?.id,
+      description: `Broadcasted notification "${title}" to target "${target}" (Type: ${type})`,
+      metadata: { title, type, target, userId },
+    });
+
     return res.status(201).json({
       success: true,
       message: "Notification sent successfully",
@@ -65,6 +77,7 @@ exports.sendNotification = async (req, res) => {
     return res.status(500).json({ success: false, message: error.message });
   }
 };
+
 
 // Driver/Coordinator triggers SOS -> notifies Maintenance team
 exports.sendSOSAlert = async (req, res) => {
@@ -80,6 +93,17 @@ exports.sendSOSAlert = async (req, res) => {
       sender,
       target: "maintenance",
       data: { vehicleId, driverId, latitude, longitude },
+    });
+
+    await auditLogService.record({
+      req,
+      action: "SOS_ALERT_TRIGGERED",
+      eventType: "ACTION",
+      module: "ALERTS",
+      entityType: "VEHICLE",
+      entityId: vehicleId,
+      description: `SOS Emergency triggered by ${sender} on vehicle ${vehicleId || "N/A"}`,
+      metadata: { vehicleId, driverId, latitude, longitude },
     });
 
     return res.status(201).json({ success: true, notification });
@@ -104,12 +128,23 @@ exports.resolveSOSAlert = async (req, res) => {
       data: { vehicleId },
     });
 
+    await auditLogService.record({
+      req,
+      action: "SOS_ALERT_RESOLVED",
+      eventType: "STATUS_CHANGE",
+      module: "ALERTS",
+      entityType: "VEHICLE",
+      entityId: vehicleId,
+      description: `SOS Emergency on vehicle ${vehicleId || "N/A"} resolved by ${resolvedBy || "Driver"}`,
+    });
+
     return res.status(201).json({ success: true, notification });
   } catch (error) {
     console.error("resolveSOSAlert Error:", error);
     return res.status(500).json({ success: false, message: error.message });
   }
 };
+
 
 // Fetch notifications for logged-in user / role / all
 exports.getUserNotifications = async (req, res) => {
@@ -491,11 +526,31 @@ exports.createRouteAlert = async (req, res) => {
       });
     }
 
+    await auditLogService.record({
+      req,
+      action: "ROUTE_NOTIFICATION_SENT",
+      eventType: "ACTION",
+      module: "ALERTS",
+      entityType: "ROUTE_NOTIFICATION",
+      entityId: routeAlert.id,
+      description: `Sent route alert (${notificationType}) for "${finalRouteName}" (${studentCount} students, ${driverCount} drivers affected)`,
+      metadata: {
+        routeId: finalRouteId,
+        routeName: finalRouteName,
+        notificationType,
+        effectiveDate: finalEffectiveDate,
+        effectiveTime: finalEffectiveTime,
+        studentCount,
+        driverCount,
+      },
+    });
+
     return res.status(201).json({
       success: true,
       message: "Route alert created successfully",
       alert: routeAlert,
     });
+
   } catch (error) {
     console.error("createRouteAlert Error:", error);
     return res.status(500).json({ success: false, message: error.message });

@@ -1,6 +1,8 @@
 const { PrismaClient } = require("../../generated/prisma");
+const auditLogService = require("../services/auditLogService");
 
 const prisma = new PrismaClient();
+
 
 // GET /api/routes
 // Optional query params: routeId, vehicleId, isActive
@@ -58,7 +60,7 @@ exports.createRoute = async (req, res) => {
         });
       }
 
-      return tx.routeVehicleAssignment.create({
+      const newRoute = await tx.routeVehicleAssignment.create({
         data: {
           routeId,
           routeName,
@@ -69,6 +71,26 @@ exports.createRoute = async (req, res) => {
           notes: notes || null,
         },
       });
+
+      await auditLogService.record({
+        req,
+        action: "ROUTE_CREATED",
+        eventType: "CREATE",
+        module: "ROUTE_MANAGEMENT",
+        entityType: "ROUTE",
+        entityId: newRoute.id,
+        description: `Created route "${routeName}" (ID: ${routeId}) assigned to vehicle ${vehicleNumber || "None"}`,
+        newValues: {
+          routeId,
+          routeName,
+          vehicleId,
+          vehicleNumber,
+          isActive: isActive ?? true,
+        },
+        tx,
+      });
+
+      return newRoute;
     });
 
     if (vehicleId && isActive !== false) {
@@ -104,6 +126,14 @@ exports.updateRoute = async (req, res) => {
     const { routeId, routeName, vehicleId, vehicleNumber, isActive, notes } =
       req.body;
 
+    const previousRoute = await prisma.routeVehicleAssignment.findUnique({
+      where: { id },
+    });
+
+    if (!previousRoute) {
+      return res.status(404).json({ error: "Route not found" });
+    }
+
     const route = await prisma.$transaction(async (tx) => {
       if (vehicleId && isActive !== false) {
         await tx.routeVehicleAssignment.updateMany({
@@ -116,7 +146,7 @@ exports.updateRoute = async (req, res) => {
         });
       }
 
-      return tx.routeVehicleAssignment.update({
+      const updated = await tx.routeVehicleAssignment.update({
         where: { id },
         data: {
           ...(routeId !== undefined && { routeId }),
@@ -127,6 +157,31 @@ exports.updateRoute = async (req, res) => {
           ...(notes !== undefined && { notes }),
         },
       });
+
+      await auditLogService.record({
+        req,
+        action: "ROUTE_UPDATED",
+        eventType: "UPDATE",
+        module: "ROUTE_MANAGEMENT",
+        entityType: "ROUTE",
+        entityId: id,
+        description: `Updated route "${updated.routeName}" (ID: ${updated.routeId})`,
+        oldValues: {
+          routeName: previousRoute.routeName,
+          routeId: previousRoute.routeId,
+          vehicleNumber: previousRoute.vehicleNumber,
+          isActive: previousRoute.isActive,
+        },
+        newValues: {
+          routeName: updated.routeName,
+          routeId: updated.routeId,
+          vehicleNumber: updated.vehicleNumber,
+          isActive: updated.isActive,
+        },
+        tx,
+      });
+
+      return updated;
     });
 
     if (route.vehicleId && route.isActive && route.routeName) {
@@ -166,6 +221,19 @@ exports.deactivateRoute = async (req, res) => {
         removedBy: removedBy || "admin",
       },
     });
+
+    await auditLogService.record({
+      req,
+      action: "ROUTE_DEACTIVATED",
+      eventType: "STATUS_CHANGE",
+      module: "ROUTE_MANAGEMENT",
+      entityType: "ROUTE",
+      entityId: id,
+      description: `Deactivated route "${route.routeName}" (Vehicle: ${route.vehicleNumber || "None"})`,
+      oldValues: { isActive: true },
+      newValues: { isActive: false, removedBy: removedBy || "admin" },
+    });
+
     res.json(route);
   } catch (error) {
     console.error("deactivateRoute error:", error);
@@ -207,6 +275,21 @@ exports.deleteRoute = async (req, res) => {
         );
     }
 
+    await auditLogService.record({
+      req,
+      action: "ROUTE_DELETED",
+      eventType: "DELETE",
+      module: "ROUTE_MANAGEMENT",
+      entityType: "ROUTE",
+      entityId: id,
+      description: `Permanently deleted route "${existing.routeName}" (ID: ${existing.routeId})`,
+      oldValues: {
+        routeId: existing.routeId,
+        routeName: existing.routeName,
+        vehicleNumber: existing.vehicleNumber,
+      },
+    });
+
     res.json({ success: true, message: "Route permanently deleted" });
   } catch (error) {
     console.error("deleteRoute error:", error);
@@ -215,4 +298,4 @@ exports.deleteRoute = async (req, res) => {
     }
     res.status(500).json({ error: "Failed to delete route" });
   }
-};
+};

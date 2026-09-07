@@ -36,6 +36,7 @@ import {
   Phone,
   QrCode,
   Radio,
+  Shuffle,
   Siren,
   Timer,
   TriangleAlert,
@@ -45,19 +46,21 @@ import {
 } from "lucide-react-native";
 import logo from "../../../assets/logo.png";
 import BottomTabBar from "../../components/BottomTabBar";
+import BusRouteChangeQRModal from "../../components/BusRouteChangeQRModal";
 import { styles, profileStyles } from "../../styles/dashboard.styles";
 import { subModalStyles } from "../../styles/modal.styles";
 import { ProfileAvatar } from "../../components/ProfileModal";
 
 // ── Main-action definitions: icon, label, gate (capability key), colored accent ──
 const ACTION_DEFS = [
-  { key: "canScanQR", icon: QrCode, label: "Scan on\nAttendance", color: "#2563EB", onPressKey: "scanQR" },
+  // { key: "canScanQR", icon: QrCode, label: "Scan on\nAttendance", color: "#2563EB", onPressKey: "scanQR" },
+  { key: "canBusRouteChangeQR", icon: Shuffle, label: "Bus / Route\nChange QR", color: "#8B5CF6", onPressKey: "busChangeQR" },
   { key: "canRaiseIssue", icon: TriangleAlert, label: "Raise\nIssue", color: "#F97316", onPressKey: "raiseIssue" },
   { key: "canSelfie", icon: CircleStop, label: "Start / Halt\nRecord", color: "#EC4899", onPressKey: "selfie" },
   { key: "canCreateMaintLog", icon: FileText, label: "Create\nMaint. Log", color: "#0D9488", onPressKey: "maintLog" },
   { key: "canViewLogHistory", icon: ClipboardList, label: "Log\nHistory", color: "#0D9488", onPressKey: "logHistory" },
   { key: "canViewMyHistory", icon: History, label: "My\nHistory", color: "#0D9488", onPressKey: "myHistory" },
-  { key: "canViewRouteAlerts", icon: Bell, label: "Route\nAlerts", color: "#EAB308", onPressKey: "routeAlerts" },
+  // { key: "canViewRouteAlerts", icon: Bell, label: "Route\nAlerts", color: "#EAB308", onPressKey: "routeAlerts" },
 ];
 
 // ── Notification row styling by type ──
@@ -200,6 +203,7 @@ export default function StaffDashboard({ dashboard }) {
   } = dashboard;
 
   const [alertModalTab, setAlertModalTab] = useState("unread"); // "unread" | "history"
+  const [isBusChangeQROpen, setIsBusChangeQROpen] = useState(false);
   const isOnDuty = qrStatus === "STARTED";
   const now = new Date();
   const timeStr = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true });
@@ -212,6 +216,7 @@ export default function StaffDashboard({ dashboard }) {
   // Maps each action's onPressKey to its handler
   const actionHandlers = {
     scanQR: () => openCamera("QR"),
+    busChangeQR: () => setIsBusChangeQROpen(true),
     raiseIssue: () => setIsIssueModalOpen(true),
     selfie: () => openCamera("SELFIE"),
     maintLog: () => setIsMaintLogModalOpen(true),
@@ -227,13 +232,15 @@ export default function StaffDashboard({ dashboard }) {
   };
 
   const COORDINATOR_ACTION_KEYS = [
-    "canScanQR",
+    // "canScanQR",
+    "canBusRouteChangeQR",
     "canRaiseIssue",
     "canViewMyHistory",
   ];
-  // Exactly five cards on the Home screen. Maintenance/Log History stay out of this view.
+  // Action cards on the Home screen
   const MAIN_ACTION_KEYS = [
-    "canScanQR",
+    // "canScanQR",
+    "canBusRouteChangeQR",
     "canRaiseIssue",
     "canSelfie",
     "canViewMyHistory",
@@ -2457,6 +2464,17 @@ export default function StaffDashboard({ dashboard }) {
           />
         </View>
       </Modal>
+
+      {/* ── Bus / Route Change Common QR Modal ── */}
+      <BusRouteChangeQRModal
+        visible={isBusChangeQROpen}
+        onClose={() => setIsBusChangeQROpen(false)}
+        token={token}
+        user={user}
+        userVehicle={userVehicle}
+        routeLabel={routeLabel}
+        socket={dashboard.socket}
+      />
     </SafeAreaView >
   );
 }

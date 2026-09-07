@@ -105,6 +105,8 @@ export default function useAttendanceScanner({ user, token, enabled = true }) {
   const handleScanQR = useCallback(async (vehicleNumber) => {
     let latitude = null;
     let longitude = null;
+    let accuracy = null;
+    let gpsTimestamp = null;
 
     try {
       const location = await Location.getCurrentPositionAsync({
@@ -112,6 +114,8 @@ export default function useAttendanceScanner({ user, token, enabled = true }) {
       });
       latitude = location.coords.latitude;
       longitude = location.coords.longitude;
+      accuracy = location.coords.accuracy;
+      gpsTimestamp = location.timestamp ? new Date(location.timestamp).toISOString() : new Date().toISOString();
       console.log(`[GPS DEBUG][STUDENT]
 latitude: ${latitude}
 longitude: ${longitude}
@@ -136,6 +140,9 @@ source: StudentApp-useAttendanceScanner`);
           stage: nextStageAfterScan,
           latitude,
           longitude,
+          accuracy,
+          gpsAccuracy: accuracy,
+          gpsTimestamp,
         }),
       });
       data = await response.json();

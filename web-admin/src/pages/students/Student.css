@@ -387,6 +387,125 @@
 .student-bus-cell {
   font-weight: 500;
   color: var(--student-text-main);
+  vertical-align: middle;
+}
+
+.student-bus-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.student-bus-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.student-bus-item:not(:last-child) {
+  padding-bottom: 6px;
+  border-bottom: 1px dashed #e2e8f0;
+}
+
+.student-bus-number {
+  font-weight: 600;
+  color: #111827;
+  font-size: 0.92rem;
+}
+
+.student-bus-route {
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+.student-bus-unassigned {
+  color: #9ca3af;
+  font-style: italic;
+  font-size: 0.88rem;
+}
+
+/* Modal vehicle badges */
+.student-selected-vehicles-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.student-vehicle-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #f3e8ff;
+  border: 1px solid #d8b4fe;
+  color: #6b21a8;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+
+.student-vehicle-badge-remove {
+  background: transparent;
+  border: none;
+  color: #9333ea;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s ease;
+}
+
+.student-vehicle-badge-remove:hover {
+  color: #dc2626;
+}
+
+.student-clear-vehicles-btn {
+  background: none;
+  border: none;
+  color: #ef4444;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.student-clear-vehicles-btn:hover {
+  color: #b91c1c;
+}
+
+/* Detail card vehicle list */
+.student-detail-bus-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.student-detail-bus-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.9rem;
+}
+
+.student-detail-bus-number {
+  font-weight: 600;
+  color: #111827;
+}
+
+.student-detail-bus-route {
+  color: #4b5563;
+}
+
+.student-detail-bus-stop {
+  color: #6b7280;
+  font-size: 0.82rem;
 }
 
 .student-payment-badge {

@@ -18,6 +18,7 @@ import Admins from "./pages/AdminSection/admins";
 import Maintenance from "./pages/maintenance/Maintenance";
 import BusChange from "./pages/busChange/BusChange";
 import Settings from "./pages/settings/Settings";
+import AuditLogs from "./pages/auditLogs/AuditLogs";
 
 function App() {
   return (
@@ -38,11 +39,13 @@ function App() {
           <Route path="/notifications" element={<Notifications />} />
           <Route path="/issues" element={<Maintenance />} />
           <Route path="/bus-change" element={<BusChange />} />
+          <Route path="/audit-logs" element={<AuditLogs />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </div>
     </Router>
   );
 }
+
 
 export default App;

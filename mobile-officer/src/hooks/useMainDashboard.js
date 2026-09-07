@@ -732,10 +732,16 @@ export function useMainDashboard({ user, token, onLogout }) {
     // this way a failed backend request never falls back to fake coordinates.
     let lat = null;
     let lng = null;
+    let acc = null;
+    let gpsTime = null;
     try {
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      lat = loc.coords.latitude;
-      lng = loc.coords.longitude;
+      if (loc?.coords) {
+        lat = loc.coords.latitude;
+        lng = loc.coords.longitude;
+        acc = loc.coords.accuracy;
+        gpsTime = loc.timestamp ? new Date(loc.timestamp).toISOString() : new Date().toISOString();
+      }
     } catch (locErr) {
       console.log("[GPS DEBUG][DRIVER] GPS fetch failed:", locErr.message);
     }
@@ -766,6 +772,9 @@ export function useMainDashboard({ user, token, onLogout }) {
           stage: nextStatus,
           latitude: lat,
           longitude: lng,
+          accuracy: acc,
+          gpsAccuracy: acc,
+          gpsTimestamp: gpsTime,
         }),
       });
       resData = await response.json().catch(() => ({}));

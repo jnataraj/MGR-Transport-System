@@ -96,8 +96,10 @@ export const apiRequest = async (
       method,
       headers: {
         "Content-Type": "application/json",
+        "x-app-name": "STUDENT_PARENT_APP",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
+
       body: body ? JSON.stringify(body) : undefined,
     });
 

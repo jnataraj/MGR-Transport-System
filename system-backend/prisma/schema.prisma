@@ -14,62 +14,51 @@ enum Role {
   STUDENT
 }
 
-// model User {
-//   id        Int      @id @default(autoincrement())
-//   name      String
-//   email     String   @unique
-//   password  String
-//   role      Role     @default(ADMIN)
-//   createdAt DateTime @default(now())
-// }
-
 model User {
-  id        String   @id @default(uuid())
-  rollNumber  String? @unique
-  name      String
-  email     String   @unique
-  password  String
+  id            String    @id @default(uuid())
+  rollNumber    String?   @unique
+  name          String
+  email         String    @unique
+  password      String
   plainPassword String? 
-  role      String // superadmin, deptadmin, driver, coordinator, student, parent
-  phone     String?
-  status    String   @default("active") // active, inactive, suspended
-  image     String?  @db.Text
-  parentName  String?
-  parentPhone String?
-  pushToken String?
-  lastSeenAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  role          String    // superadmin, deptadmin, driver, coordinator, student, parent
+  phone         String?
+  status        String    @default("active") // active, inactive, suspended
+  image         String?   @db.Text
+  parentName    String?
+  parentPhone   String?
+  pushToken     String?
+  lastSeenAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   // Driver relation
-  // assignedVehicle Vehicle? @relation("DriverVehicle")
-  license         String?
+  license       String?
   // Student relation
-  department      String?
-  year            String?
-  paymentStatus   String?
+  department    String?
+  year          String?
+  paymentStatus String?
   // Parent / Student relation (simple one to many for demo)
-  parentId        String?
-  occupation      String?
-  homeAddress     String?
-  studentName     String?
-  studentRollNo   String?
-  location        String?
-  shift           String? 
-  vehicles Vehicle[] @relation("DriverVehicle")
+  parentId      String?
+  occupation    String?
+  homeAddress   String?
+  studentName   String?
+  studentRollNo String?
+  location      String?
+  shift         String? 
+  vehicles      Vehicle[] @relation("DriverVehicle")
 
   // ── Admin-specific fields ──
-  employeeId  String?
-  roleHeader  String? // display title e.g. "Dept Admin", "Master"
-  sector      String? // AdminSection name this admin belongs to
-  permissions String? @default("[]") // JSON array of permission keys
-  loginId     String? @unique // separate web login id, distinct from email
-
+  employeeId    String?
+  roleHeader    String?   // display title e.g. "Dept Admin", "Master"
+  sector        String?   // AdminSection name this admin belongs to
+  permissions   String?   @default("[]") // JSON array of permission keys
+  loginId       String?   @unique // separate web login id, distinct from email
 
   // Assignment relations
   studentAssignments     VehicleStudentAssignment[]
   coordinatorAssignments VehicleCoordinatorAssignment[]
-   inchargeSections AdminSection[] @relation("SectionIncharge")
+  inchargeSections       AdminSection[] @relation("SectionIncharge")
 }
 
 // ── Admin Sections (Driver Section, Coordinator Section, Maintenance Section, ...) ──
@@ -99,7 +88,7 @@ model Notification {
 model Vehicle {
   id                 String  @id @default(uuid())
   number             String  @unique
-  type               String // bus, car
+  type               String  // bus, car
   vehicleTypeId      String? // classification ID e.g. "BUS-60", "CAR-08"
   model              String?
   capacity           Int?
@@ -121,35 +110,13 @@ model Vehicle {
   assignedCoordinators VehicleCoordinatorAssignment[]
 }
 
-// model VehicleStudentAssignment {
-//   id        String   @id @default(uuid())
-//   vehicle   Vehicle  @relation(fields: [vehicleId], references: [id])
-//   vehicleId String
-//   student   User     @relation(fields: [studentId], references: [id])
-//   studentId String
-//   createdAt DateTime @default(now())
-
-//   @@unique([vehicleId, studentId])
-// }
-
-// model VehicleCoordinatorAssignment {
-//   id          String   @id @default(uuid())
-//   vehicle     Vehicle  @relation(fields: [vehicleId], references: [id])
-//   vehicleId   String
-//   coordinator User     @relation(fields: [coordinatorId], references: [id])
-//   coordinatorId String
-//   createdAt   DateTime @default(now())
-
-//   @@unique([vehicleId, coordinatorId])
-// }
-
 // ── Vehicle ↔ Student assignment (permanent home bus) ──────────────────────────
 model VehicleStudentAssignment {
   id          String   @id @default(uuid())
   vehicleId   String
   vehicle     Vehicle  @relation(fields: [vehicleId], references: [id])
   studentId   String
-  student     User     @relation(fields: [studentId], references: [id]) // ADD THIS
+  student     User     @relation(fields: [studentId], references: [id])
   studentName String   @default("")
   class       String?
   pickupPoint String?
@@ -166,7 +133,7 @@ model VehicleCoordinatorAssignment {
   vehicleId       String
   vehicle         Vehicle  @relation(fields: [vehicleId], references: [id])
   coordinatorId   String
-  coordinator     User     @relation(fields: [coordinatorId], references: [id]) // ADD THIS
+  coordinator     User     @relation(fields: [coordinatorId], references: [id])
   coordinatorName String   @default("")
   assignedAt      DateTime @default(now())
   assignedBy      String   @default("admin")
@@ -179,7 +146,7 @@ model VehicleCoordinatorAssignment {
 model VehicleAssignmentAuditLog {
   id        String   @id @default(uuid())
   vehicleId String
-  action    String // assigned_members | removed_student | removed_coordinator | updated_driver
+  action    String   // assigned_members | removed_student | removed_coordinator | updated_driver
   details   String   @default("{}") // JSON string snapshot
   adminId   String   @default("admin")
   adminName String   @default("Super Admin")
@@ -190,7 +157,7 @@ model Attendance {
   id        String   @id @default(uuid())
   userId    String
   vehicleId String
-  type      String // driver_scan, student_scan
+  type      String   // driver_scan, student_scan
   stage     String?  // e.g. MORNING_PICKUP, MORNING_INROUTE, MORNING_COLLEGE, EVENING_COLLEGE, EVENING_INROUTE, EVENING_DROP
   latitude  Float?
   longitude Float?
@@ -209,14 +176,14 @@ model Issue {
 
 model ServiceRequest {
   id          String    @id @default(uuid())
-  requestType String // Oil Change, Brake Inspection, etc.
+  requestType String    // Oil Change, Brake Inspection, etc.
   description String
   vehicleId   String?
   driverName  String
   driverId    String?
   priority    String    @default("medium") // low, medium, high, critical
   status      String    @default("pending") // pending, approved, rejected, in_progress, completed
-  notes       String? // Admin notes on approval/rejection
+  notes       String?   // Admin notes on approval/rejection
   approvedBy  String?
   approvedAt  DateTime?
   completedAt DateTime?
@@ -227,8 +194,8 @@ model ServiceRequest {
 // ── Maintenance Alerts (raised from web admin, pushed to maintenance app) ──
 model MaintenanceAlert {
   id             String    @id @default(uuid())
-  vehicle        String // e.g. BUS-01
-  issueType      String // Engine/Mechanical, Brakes, etc.
+  vehicle        String    // e.g. BUS-01
+  issueType      String    // Engine/Mechanical, Brakes, etc.
   description    String
   priority       String    @default("Medium") // Critical, High, Medium, Low
   status         String    @default("Pending") // Pending, Acknowledged, Resolved
@@ -242,10 +209,10 @@ model MaintenanceAlert {
 // ── Bus Shutdown Events (pushed to student/parent/HoD/coordinator apps) ──
 model BusShutdown {
   id             String    @id @default(uuid())
-  vehicle        String // Bus that is offline e.g. BUS-01
-  reason         String // Short description
-  replacementBus String? // e.g. BUS-05
-  affectedRoute  String? // e.g. Route 7 (Theni)
+  vehicle        String    // Bus that is offline e.g. BUS-01
+  reason         String    // Short description
+  replacementBus String?   // e.g. BUS-05
+  affectedRoute  String?   // e.g. Route 7 (Theni)
   priority       String    @default("High")
   status         String    @default("Active") // Active, Resolved
   resolvedAt     DateTime?
@@ -258,9 +225,9 @@ model StudentVehicleMapping {
   id                String   @id @default(uuid())
   studentId         String   @unique
   studentName       String
-  originalVehicleId String // Permanent home bus
-  activeVehicleId   String // Current active bus (differs during temp swap)
-  assignmentId      String? // FK to BusAssignment when temp swap is live
+  originalVehicleId String   // Permanent home bus
+  activeVehicleId   String   // Current active bus (differs during temp swap)
+  assignmentId      String?  // FK to BusAssignment when temp swap is live
   pickupLocation    String?
   dropLocation      String?
   createdAt         DateTime @default(now())
@@ -274,7 +241,7 @@ model BusAssignment {
   fromVehicleNumber     String
   toVehicleId           String
   toVehicleNumber       String
-  assignmentType        String // temporary | permanent
+  assignmentType        String    // temporary | permanent
   status                String    @default("active") // active | expired | cancelled | converted_to_permanent
   startDate             DateTime
   endDate               DateTime?
@@ -319,7 +286,7 @@ model BusChangeAuditLog {
   newDriver            String?
   previousRoute        String?
   newRoute             String?
-  assignmentType       String // temporary | permanent
+  assignmentType       String    // temporary | permanent
   effectiveDate        DateTime
   restorationDate      DateTime?
   studentsAffected     Int       @default(0)
@@ -337,8 +304,8 @@ model BusChangeAuditLog {
 // ── Route ↔ Vehicle Assignment ─────────────────────────────────────────────
 model RouteVehicleAssignment {
   id            String    @id @default(uuid())
-  routeId       String // logical route ID (e.g. RT-01)
-  routeName     String // human label
+  routeId       String    // logical route ID (e.g. RT-01)
+  routeName     String    // human label
   vehicleId     String?
   vehicleNumber String?
   isActive      Boolean   @default(true)
@@ -358,10 +325,10 @@ model RouteNotification {
   routeName            String
   vehicleIdsJson       String   @default("[]") // JSON array of vehicleIds selected
   vehicleNumbersJson   String   @default("[]") // JSON array of vehicle numbers
-  notificationType     String // RouteChange|EarlyArrival|DelayedDeparture|Diversion|Closure|Emergency|PickupChange|DropChange
+  notificationType     String   // RouteChange|EarlyArrival|DelayedDeparture|Diversion|Closure|Emergency|PickupChange|DropChange
   effectiveDate        String
   effectiveTime        String
-  duration             String? // null = permanent
+  duration             String?  // null = permanent
   updatedRoute         String?
   pickupChange         String?
   dropChange           String?
@@ -388,13 +355,13 @@ model RouteNotification {
 // ── Vehicle GPS Log (throttled DB persistence of driver GPS updates) ─────────
 model VehicleGPSLog {
   id            String   @id @default(uuid())
-  vehicleId     String // FK to Vehicle.id
+  vehicleId     String   // FK to Vehicle.id
   vehicleNumber String   @default("")
-  driverId      String? // FK to User.id (driver)
+  driverId      String?  // FK to User.id (driver)
   latitude      Float
   longitude     Float
   speed         Float?   @default(0) // km/h, if available
-  heading       Float? // degrees 0-360
+  heading       Float?   // degrees 0-360
   isHalted      Boolean  @default(false)
   recordedAt    DateTime @default(now())
 
@@ -405,14 +372,14 @@ model VehicleGPSLog {
 // ── Student Transit Lifecycle (board → in-transit → drop) ───────────────────
 model StudentTransit {
   id            String    @id @default(uuid())
-  studentId     String // FK to User.id (student)
+  studentId     String    // FK to User.id (student)
   studentName   String    @default("")
-  vehicleId     String // FK to Vehicle.id
+  vehicleId     String    // FK to Vehicle.id
   vehicleNumber String    @default("")
-  parentId      String? // FK to User.id (parent), for direct notify
-  department    String? // e.g. "Computer Science"
-  year          String? // e.g. "2nd Year"
-  hodEmail      String? // HoD email for department lookup
+  parentId      String?   // FK to User.id (parent), for direct notify
+  department    String?   // e.g. "Computer Science"
+  year          String?   // e.g. "2nd Year"
+  hodEmail      String?   // HoD email for department lookup
   boardedAt     DateTime  @default(now())
   droppedAt     DateTime?
   boardLat      Float?
@@ -420,7 +387,7 @@ model StudentTransit {
   dropLat       Float?
   dropLng       Float?
   status        String    @default("in_transit") // in_transit | dropped | missed | absent
-  date          String // YYYY-MM-DD for daily filtering
+  date          String    // YYYY-MM-DD for daily filtering
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -433,17 +400,17 @@ model StudentTransit {
 // ── Vehicle Halt Events (driver-reported halts with GPS + reason) ────────────
 model VehicleHalt {
   id            String    @id @default(uuid())
-  vehicleId     String // FK to Vehicle.id
+  vehicleId     String    // FK to Vehicle.id
   vehicleNumber String    @default("")
-  driverId      String? // FK to User.id (driver)
+  driverId      String?   // FK to User.id (driver)
   driverName    String?
   latitude      Float?
   longitude     Float?
   haltReason    String    @default("other") // traffic | breakdown | scheduled_stop | passenger_boarding | other
-  customReason  String? // free text if reason = other
+  customReason  String?   // free text if reason = other
   startedAt     DateTime  @default(now())
   endedAt       DateTime?
-  durationSec   Int? // calculated on resume
+  durationSec   Int?      // calculated on resume
   status        String    @default("active") // active | resumed
   studentCount  Int       @default(0) // in-transit students on that vehicle at halt time
   createdAt     DateTime  @default(now())
@@ -505,3 +472,126 @@ model StudentMissingAlert {
   @@index([alertTime])
 }
 
+// ── Common QR Session for Bus / Route Change ──
+model BusRouteChangeSession {
+  id           String    @id @default(uuid())
+  sessionToken String    @unique
+  driverId     String
+  driverName   String?
+  busId        String
+  busNumber    String
+  routeId      String?
+  routeName    String?
+  status       String    @default("ACTIVE") // ACTIVE | EXPIRED | CLOSED
+  expiresAt    DateTime
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  history      BusRouteChangeHistory[]
+
+  @@index([driverId])
+  @@index([busId])
+  @@index([status])
+  @@index([sessionToken])
+}
+
+// ── Immutable Audit Log for Student Bus / Route Changes ──
+model BusRouteChangeHistory {
+  id              String    @id @default(uuid())
+  referenceNumber String    @unique // e.g. BRC-XXXXXX
+  studentId       String
+  studentName     String
+  studentRollNo   String?
+  oldBusId        String?
+  oldBusNumber    String?
+  oldRouteId      String?
+  oldRouteName    String?
+  newBusId        String
+  newBusNumber    String
+  newRouteId      String?
+  newRouteName    String?
+  driverId        String
+  driverName      String?
+  qrSessionId     String?
+  qrSession       BusRouteChangeSession? @relation(fields: [qrSessionId], references: [id])
+  changeType      String    @default("QR_SCAN") // QR_SCAN | ADMIN_OVERRIDE
+  status          String    @default("COMPLETED") // PENDING | CONFIRMED | COMPLETED | CANCELLED | REJECTED
+  studentLat      Float?
+  studentLng      Float?
+  driverLat       Float?
+  driverLng       Float?
+  remarks         String?
+  scannedAt       DateTime  @default(now())
+  confirmedAt     DateTime  @default(now())
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([studentId])
+  @@index([newBusId])
+  @@index([driverId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([referenceNumber])
+}
+
+// ── Centralized System Audit Log ─────────────────────────────────────────────
+model AuditLog {
+  id              String    @id @default(uuid())
+  eventId         String    @unique // e.g. AUD-20260902-123456
+  userId          String?
+  userRole        String?
+  userName        String?
+  action          String    // e.g. BUS_ROUTE_CHANGE_CONFIRMED, LOGIN_SUCCESS, TRIP_STARTED, STUDENT_BOARDED, etc.
+  eventType       String    // CREATE, UPDATE, DELETE, AUTH, STATUS_CHANGE, ACTION
+  module          String    // AUTH, USER_MANAGEMENT, BUS_ROUTE_MANAGEMENT, VEHICLE_MANAGEMENT, ATTENDANCE, etc.
+  entityType      String?   // STUDENT, DRIVER, VEHICLE, ROUTE, ATTENDANCE, etc.
+  entityId        String?
+  description     String?   @db.Text
+  oldValues       String?   @db.Text
+  newValues       String?   @db.Text
+  metadata        String?   @db.Text
+
+  // GPS Location Tracking
+  latitude        Float?
+  longitude       Float?
+  gpsAccuracy     Float?    // in meters (e.g. 7.5)
+  gpsTimestamp    DateTime? // Timestamp when mobile device captured the GPS fix
+  serverReceivedAt DateTime @default(now()) // Timestamp when server processed the event
+  locationStatus  String?   // CAPTURED, PERMISSION_DENIED, UNAVAILABLE, APPROXIMATE
+  locationQuality String?   // HIGH, MEDIUM, LOW
+
+  // Associated Entity References
+  vehicleId       String?
+  vehicleNumber   String?
+  routeId         String?
+  routeName       String?
+  studentId       String?
+  driverId        String?
+  qrSessionId     String?
+
+  // Client / Device Context
+  ipAddress       String?
+  userAgent       String?
+  deviceId        String?
+  appName         String    @default("SYSTEM_BACKEND") // WEB_ADMIN, OFFICER_APP, STUDENT_PARENT_APP, SYSTEM_BACKEND
+  appVersion      String?
+  status          String    @default("SUCCESS") // SUCCESS, FAILED
+  failureReason   String?   @db.Text
+  requestId       String?
+  createdAt       DateTime  @default(now())
+
+  @@index([userId])
+  @@index([userRole])
+  @@index([action])
+  @@index([module])
+  @@index([entityType])
+  @@index([entityId])
+  @@index([appName])
+  @@index([status])
+  @@index([createdAt])
+  @@index([eventId])
+  @@index([vehicleId])
+  @@index([vehicleNumber])
+  @@index([driverId])
+  @@index([studentId])
+}

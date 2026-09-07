@@ -1,5 +1,8 @@
 const router = require("express").Router();
 const ctrl = require("../controllers/adminSections.controller");
+const { optionalToken } = require("../middleware/auth.middleware");
+
+router.use(optionalToken);
 
 router.get("/", ctrl.getSections);
 router.post("/", ctrl.createSection);
@@ -8,4 +11,4 @@ router.delete("/:id", ctrl.deleteSection);
 router.post("/:id/incharge", ctrl.setIncharge);
 router.delete("/:id/incharge", ctrl.removeIncharge);
 
-module.exports = router;
+module.exports = router;

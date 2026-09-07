@@ -416,6 +416,67 @@ export const createRouteAlert = async (data) => {
   return handleResponse(response);
 };
 
+export const fetchBusRouteChangeHistory = async (params = {}) => {
+  const token = localStorage.getItem("token");
+  const headers = {
+    "x-app-name": "WEB_ADMIN",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+  const response = await fetch(`${API_BASE}/bus-route-change/history${buildQuery(params)}`, { headers });
+  return handleResponse(response);
+};
+
+// ── Audit Logs API ──────────────────────────────────────────────────────────
+export const fetchAuditLogs = async (params = {}) => {
+  const token = localStorage.getItem("token");
+  const headers = {
+    "x-app-name": "WEB_ADMIN",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+  const response = await fetch(`${API_BASE}/audit-logs${buildQuery(params)}`, { headers });
+  return handleResponse(response);
+};
+
+export const fetchAuditLogById = async (id) => {
+  const token = localStorage.getItem("token");
+  const headers = {
+    "x-app-name": "WEB_ADMIN",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+  const response = await fetch(`${API_BASE}/audit-logs/${id}`, { headers });
+  return handleResponse(response);
+};
+
+export const fetchAuditStats = async () => {
+  const token = localStorage.getItem("token");
+  const headers = {
+    "x-app-name": "WEB_ADMIN",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+  const response = await fetch(`${API_BASE}/audit-logs/stats`, { headers });
+  return handleResponse(response);
+};
+
+export const exportAuditLogsCsv = async (params = {}) => {
+  const token = localStorage.getItem("token");
+  const headers = {
+    "x-app-name": "WEB_ADMIN",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+  const response = await fetch(`${API_BASE}/audit-logs/export${buildQuery(params)}`, { headers });
+  if (!response.ok) {
+    throw new Error("Failed to export audit logs");
+  }
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `audit-logs-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(url);
+};
 
 export default {
   socket,
@@ -460,4 +521,9 @@ export default {
   fetchSettings,
   updateGpsSettings,
   updateSystemSettings,
+  fetchAuditLogs,
+  fetchAuditLogById,
+  fetchAuditStats,
+  exportAuditLogsCsv,
 };
+

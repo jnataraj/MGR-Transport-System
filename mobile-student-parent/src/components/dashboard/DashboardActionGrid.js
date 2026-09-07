@@ -1,10 +1,11 @@
 import React from "react";
 import { Text, TouchableOpacity, View } from "react-native";
-import { QrCode, History, MapPin, Bell, ChevronRight } from "lucide-react-native";
+import { QrCode, History, MapPin, Bell, ChevronRight, Shuffle } from "lucide-react-native";
 import styles from "../../styles/dashboard.styles";
 
 const ACTION_THEMES = {
   qr: { bg: "#EFF6FF", fg: "#2563EB" },
+  change: { bg: "#F3E8FF", fg: "#8B5CF6" },
   history: { bg: "#FFF7ED", fg: "#F97316" },
   tracking: { bg: "#ECFDF5", fg: "#10B981" },
   alerts: { bg: "#FEF2F2", fg: "#EF4444" },
@@ -36,6 +37,7 @@ export default function DashboardActionGrid({
   role,
   unreadAlerts,
   onBoardingQR,
+  onBusRouteChange,
   onTravelHistory,
   onLiveTracking,
   onRouteAlerts,
@@ -44,6 +46,9 @@ export default function DashboardActionGrid({
     <View style={styles.grid}>
       {role === "student" && (
         <Action Icon={QrCode} theme="qr" label={"Boarding\nQR Code"} onPress={onBoardingQR} />
+      )}
+      {role === "student" && (
+        <Action Icon={Shuffle} theme="change" label={"Bus / Route\nChange"} onPress={onBusRouteChange} />
       )}
       {role !== "hod" && (
         <Action Icon={History} theme="history" label={"Travel\nHistory"} onPress={onTravelHistory} />

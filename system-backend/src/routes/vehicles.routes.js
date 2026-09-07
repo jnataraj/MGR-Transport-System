@@ -1,6 +1,9 @@
 const express = require("express");
 const router = express.Router();
 const ctrl = require("../controllers/vehicles.controller");
+const { optionalToken } = require("../middleware/auth.middleware");
+
+router.use(optionalToken);
 
 router.get("/", ctrl.fetchVehicles);
 router.post("/", ctrl.createVehicle);
@@ -13,3 +16,4 @@ router.post("/:id/assign", ctrl.assignVehicleMembers);
 router.delete("/:id/members", ctrl.removeVehicleMember);
 
 module.exports = router;
+

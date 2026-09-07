@@ -1,6 +1,7 @@
 
 const { PrismaClient } = require("../../generated/prisma");
 const prisma = new PrismaClient();
+const auditLogService = require("../services/auditLogService");
 
 // Singleton row — settings always live at id = "singleton".
 const SETTINGS_ID = "singleton";
@@ -39,6 +40,10 @@ const updateGpsConfig = async (req, res) => {
     try {
         const { gpsMismatchRadius, gpsLogInterval, googleMapsApiKey } = req.body;
 
+        const previousSettings = await prisma.systemSettings.findUnique({
+            where: { id: SETTINGS_ID },
+        });
+
         const patch = {
             ...(gpsMismatchRadius !== undefined && {
                 gpsMismatchRadius: Number(gpsMismatchRadius),
@@ -59,6 +64,24 @@ const updateGpsConfig = async (req, res) => {
         const io = req.app.get("io");
         if (io) io.emit("systemSettingsUpdated", settings);
 
+        await auditLogService.record({
+            req,
+            action: "SETTING_UPDATED",
+            eventType: "UPDATE",
+            module: "SETTINGS",
+            entityType: "SYSTEM_SETTINGS",
+            entityId: SETTINGS_ID,
+            description: `Updated GPS system settings (Radius: ${settings.gpsMismatchRadius}m, Interval: ${settings.gpsLogInterval}s)`,
+            oldValues: {
+                gpsMismatchRadius: previousSettings?.gpsMismatchRadius,
+                gpsLogInterval: previousSettings?.gpsLogInterval,
+            },
+            newValues: {
+                gpsMismatchRadius: settings.gpsMismatchRadius,
+                gpsLogInterval: settings.gpsLogInterval,
+            },
+        });
+
         res.json({ success: true, settings });
     } catch (err) {
         console.error("updateGpsConfig error", err);
@@ -74,6 +97,10 @@ const updateSystemConfig = async (req, res) => {
     try {
         const { systemEmail } = req.body;
 
+        const previousSettings = await prisma.systemSettings.findUnique({
+            where: { id: SETTINGS_ID },
+        });
+
         const patch = {
             ...(systemEmail !== undefined && { systemEmail }),
         };
@@ -87,6 +114,18 @@ const updateSystemConfig = async (req, res) => {
         const io = req.app.get("io");
         if (io) io.emit("systemSettingsUpdated", settings);
 
+        await auditLogService.record({
+            req,
+            action: "SETTING_UPDATED",
+            eventType: "UPDATE",
+            module: "SETTINGS",
+            entityType: "SYSTEM_SETTINGS",
+            entityId: SETTINGS_ID,
+            description: `Updated system email setting: ${systemEmail}`,
+            oldValues: { systemEmail: previousSettings?.systemEmail },
+            newValues: { systemEmail: settings.systemEmail },
+        });
+
         res.json({ success: true, settings });
     } catch (err) {
         console.error("updateSystemConfig error", err);
@@ -94,4 +133,4 @@ const updateSystemConfig = async (req, res) => {
     }
 };
 
-module.exports = { getSettings, updateGpsConfig, updateSystemConfig };
+module.exports = { getSettings, updateGpsConfig, updateSystemConfig };

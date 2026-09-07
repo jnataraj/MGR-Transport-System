@@ -33,3 +33,48 @@ exports.verifyToken = (req, res, next) => {
     });
   }
 };
+
+/**
+ * Middleware that extracts user token if present, but doesn't reject if absent
+ */
+exports.optionalToken = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return next();
+  }
+
+  const token = authHeader.split(" ")[1];
+  if (!token) return next();
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = decoded;
+  } catch (error) {
+    // Ignore invalid token on optional routes
+  }
+  next();
+};
+
+/**
+ * Restricts access to Admin roles (superadmin, admin, deptadmin)
+ */
+exports.requireAdmin = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({
+      success: false,
+      message: "Authentication required",
+    });
+  }
+
+  const role = (req.user.role || "").toLowerCase();
+  const allowedAdminRoles = ["superadmin", "admin", "deptadmin"];
+
+  if (!allowedAdminRoles.includes(role)) {
+    return res.status(403).json({
+      success: false,
+      message: "Forbidden: Admin access required",
+    });
+  }
+
+  next();
+};

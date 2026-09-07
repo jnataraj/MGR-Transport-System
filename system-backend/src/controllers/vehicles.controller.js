@@ -1,5 +1,7 @@
 const prisma = require("../prisma/prisma");
 const { isVehicleOnline } = require("../utils/vehicleLocationStore");
+const auditLogService = require("../services/auditLogService");
+
 
 const parseOptionalNumber = (value) => {
   if (value === undefined || value === null || value === "") return undefined;
@@ -213,7 +215,7 @@ const createVehicle = async (req, res) => {
       // Keep RouteVehicleAssignment in sync
       await syncVehicleRouteAssignment(tx, vehicle);
 
-      return tx.vehicle.findUnique({
+      const result = await tx.vehicle.findUnique({
         where: { id: vehicle.id },
         include: {
           driver: true,
@@ -221,6 +223,27 @@ const createVehicle = async (req, res) => {
           assignedCoordinators: { include: { coordinator: true } },
         },
       });
+
+      await auditLogService.record({
+        req,
+        action: "BUS_CREATED",
+        eventType: "CREATE",
+        module: "VEHICLE_MANAGEMENT",
+        entityType: "VEHICLE",
+        entityId: vehicle.id,
+        description: `Created vehicle ${vehicle.number} (Type: ${vehicle.type || "Bus"}, Route: ${vehicle.route || "Unassigned"})`,
+        newValues: {
+          id: vehicle.id,
+          number: vehicle.number,
+          type: vehicle.type,
+          route: vehicle.route,
+          capacity: vehicle.capacity,
+          driverId: vehicle.driverId,
+        },
+        tx,
+      });
+
+      return result;
     });
 
     res.status(201).json(normalizeVehicle(createdVehicle));
@@ -237,6 +260,14 @@ const updateVehicle = async (req, res) => {
     const { id } = req.params;
     const vehicleData = await sanitizeVehicleData(req.body);
 
+    const previousVehicle = await prisma.vehicle.findUnique({
+      where: { id },
+    });
+
+    if (!previousVehicle) {
+      return res.status(404).json({ error: "Vehicle not found" });
+    }
+
     const vehicle = await prisma.$transaction(async (tx) => {
       const updated = await tx.vehicle.update({
         where: { id },
@@ -245,6 +276,31 @@ const updateVehicle = async (req, res) => {
 
       // Keep RouteVehicleAssignment in sync
       await syncVehicleRouteAssignment(tx, updated);
+
+      await auditLogService.record({
+        req,
+        action: "BUS_UPDATED",
+        eventType: "UPDATE",
+        module: "VEHICLE_MANAGEMENT",
+        entityType: "VEHICLE",
+        entityId: id,
+        description: `Updated vehicle ${updated.number}`,
+        oldValues: {
+          number: previousVehicle.number,
+          route: previousVehicle.route,
+          status: previousVehicle.status,
+          capacity: previousVehicle.capacity,
+          driverId: previousVehicle.driverId,
+        },
+        newValues: {
+          number: updated.number,
+          route: updated.route,
+          status: updated.status,
+          capacity: updated.capacity,
+          driverId: updated.driverId,
+        },
+        tx,
+      });
 
       return updated;
     });
@@ -255,6 +311,7 @@ const updateVehicle = async (req, res) => {
     res.status(500).json({ error: "Failed to update vehicle" });
   }
 };
+
 
 const fetchVehicleMembers = async (req, res) => {
   try {
@@ -348,6 +405,24 @@ const assignVehicleMembers = async (req, res) => {
           skipDuplicates: true,
         });
       }
+
+      await auditLogService.record({
+        req,
+        action: "BUS_MEMBERS_ASSIGNED",
+        eventType: "UPDATE",
+        module: "VEHICLE_MANAGEMENT",
+        entityType: "VEHICLE",
+        entityId: id,
+        description: `Assigned members to vehicle: Driver ID ${driverId || "None"}, ${studentIds.length} students, ${coordinatorIds.length} coordinators`,
+        metadata: {
+          driverId,
+          studentCount: studentIds.length,
+          coordinatorCount: coordinatorIds.length,
+          studentIds,
+          coordinatorIds,
+        },
+        tx,
+      });
     });
 
     const updated = await prisma.vehicle.findUnique({
@@ -370,6 +445,16 @@ const removeVehicleMember = async (req, res) => {
 
     if (type === "driver") {
       await prisma.vehicle.update({ where: { id }, data: { driverId: null } });
+      await auditLogService.record({
+        req,
+        action: "DRIVER_UNASSIGNED",
+        eventType: "UPDATE",
+        module: "VEHICLE_MANAGEMENT",
+        entityType: "VEHICLE",
+        entityId: id,
+        description: `Unassigned driver ${memberId} from vehicle ${id}`,
+        metadata: { vehicleId: id, driverId: memberId },
+      });
       return res.json({ success: true });
     }
 
@@ -377,12 +462,32 @@ const removeVehicleMember = async (req, res) => {
       await prisma.vehicleStudentAssignment.deleteMany({
         where: { vehicleId: id, studentId: memberId },
       });
+      await auditLogService.record({
+        req,
+        action: "STUDENT_UNASSIGNED_FROM_BUS",
+        eventType: "UPDATE",
+        module: "VEHICLE_MANAGEMENT",
+        entityType: "VEHICLE",
+        entityId: id,
+        description: `Removed student ${memberId} from vehicle ${id}`,
+        metadata: { vehicleId: id, studentId: memberId },
+      });
       return res.json({ success: true });
     }
 
     if (type === "coordinator") {
       await prisma.vehicleCoordinatorAssignment.deleteMany({
         where: { vehicleId: id, coordinatorId: memberId },
+      });
+      await auditLogService.record({
+        req,
+        action: "COORDINATOR_UNASSIGNED_FROM_BUS",
+        eventType: "UPDATE",
+        module: "VEHICLE_MANAGEMENT",
+        entityType: "VEHICLE",
+        entityId: id,
+        description: `Removed coordinator ${memberId} from vehicle ${id}`,
+        metadata: { vehicleId: id, coordinatorId: memberId },
       });
       return res.json({ success: true });
     }
@@ -396,48 +501,85 @@ const removeVehicleMember = async (req, res) => {
 
 const assignStudentBus = async (req, res) => {
   try {
-    const { studentId, vehicleNumber, vehicleId, pickupPoint } = req.body;
+    const { studentId, vehicleNumber, vehicleId, vehicleIds, pickupPoint } = req.body;
     if (!studentId) {
       return res.status(400).json({ error: "studentId is required" });
     }
     await prisma.vehicleStudentAssignment.deleteMany({ where: { studentId } });
-    const targetIdentifier = vehicleId || vehicleNumber;
-    if (!targetIdentifier || targetIdentifier === "Not Assigned" || targetIdentifier === "") {
-      return res.json({ success: true, vehicleId: null, vehicleNumber: null, route: null });
+
+    const rawIds = vehicleIds || (vehicleId ? [vehicleId] : (vehicleNumber ? [vehicleNumber] : []));
+    let cleanIds = (Array.isArray(rawIds) ? rawIds : [rawIds]).filter((id) => id && id !== "Not Assigned" && id !== "");
+
+    if (cleanIds.length === 0) {
+      await auditLogService.record({
+        req,
+        action: "STUDENT_BUS_UNASSIGNED",
+        eventType: "UPDATE",
+        module: "BUS_ROUTE_MANAGEMENT",
+        entityType: "STUDENT",
+        entityId: studentId,
+        description: `Unassigned all buses for student ${studentId}`,
+      });
+      return res.json({ success: true, vehicleId: null, vehicleNumber: null, route: null, pickupPoint: null });
     }
-    const vehicle = await prisma.vehicle.findFirst({
+
+    const vehicles = await prisma.vehicle.findMany({
       where: {
         OR: [
-          { id: targetIdentifier },
-          { number: targetIdentifier },
+          { id: { in: cleanIds } },
+          { number: { in: cleanIds } },
         ],
       },
     });
-    if (!vehicle) {
-      return res.status(404).json({ error: `Vehicle ${targetIdentifier} not found` });
+
+    if (vehicles.length === 0) {
+      return res.status(404).json({ error: "No matching vehicles found" });
     }
+
     const student = await prisma.user.findUnique({ where: { id: studentId } });
     const effectivePickup = pickupPoint !== undefined && pickupPoint !== "" ? pickupPoint : (student?.location || null);
-    await prisma.vehicleStudentAssignment.create({
-      data: {
-        vehicleId: vehicle.id,
-        studentId,
-        studentName: student?.name || "",
-        class: student?.department || null,
-        pickupPoint: effectivePickup || undefined,
-      },
-    });
+
+    for (const vehicle of vehicles) {
+      await prisma.vehicleStudentAssignment.create({
+        data: {
+          vehicleId: vehicle.id,
+          studentId,
+          studentName: student?.name || "",
+          class: student?.department || null,
+          pickupPoint: effectivePickup || undefined,
+        },
+      });
+    }
+
     if (pickupPoint !== undefined && pickupPoint !== "") {
       await prisma.user.update({
         where: { id: studentId },
         data: { location: pickupPoint },
       });
     }
+
+    const primaryVehicle = vehicles[0] || null;
+
+    await auditLogService.record({
+      req,
+      action: "STUDENT_BUS_ASSIGNED",
+      eventType: "UPDATE",
+      module: "BUS_ROUTE_MANAGEMENT",
+      entityType: "STUDENT",
+      entityId: studentId,
+      description: `Assigned student ${student?.name || studentId} to vehicle(s) ${vehicles.map((v) => v.number).join(", ")}`,
+      newValues: {
+        studentId,
+        vehicles: vehicles.map((v) => ({ id: v.id, number: v.number, route: v.route })),
+        pickupPoint: effectivePickup,
+      },
+    });
+
     res.json({
       success: true,
-      vehicleId: vehicle.id,
-      vehicleNumber: vehicle.number,
-      route: vehicle.route || null,
+      vehicleId: primaryVehicle?.id || null,
+      vehicleNumber: vehicles.map((v) => v.number).join(", "),
+      route: vehicles.map((v) => v.route).filter(Boolean).join(", ") || null,
       pickupPoint: effectivePickup || null,
     });
   } catch (err) {
@@ -450,6 +592,14 @@ const deleteVehicle = async (req, res) => {
   try {
     const { id } = req.params;
 
+    const existing = await prisma.vehicle.findUnique({
+      where: { id },
+    });
+
+    if (!existing) {
+      return res.status(404).json({ error: "Vehicle not found" });
+    }
+
     await prisma.$transaction(async (tx) => {
       await tx.vehicleStudentAssignment.deleteMany({ where: { vehicleId: id } });
       await tx.vehicleCoordinatorAssignment.deleteMany({ where: { vehicleId: id } });
@@ -458,6 +608,22 @@ const deleteVehicle = async (req, res) => {
         data: { isActive: false, removedAt: new Date(), removedBy: "vehicle-deleted" },
       });
       await tx.vehicle.delete({ where: { id } });
+
+      await auditLogService.record({
+        req,
+        action: "BUS_DELETED",
+        eventType: "DELETE",
+        module: "VEHICLE_MANAGEMENT",
+        entityType: "VEHICLE",
+        entityId: id,
+        description: `Deleted vehicle ${existing.number}`,
+        oldValues: {
+          id: existing.id,
+          number: existing.number,
+          route: existing.route,
+        },
+        tx,
+      });
     });
 
     res.json({ success: true });
@@ -469,6 +635,7 @@ const deleteVehicle = async (req, res) => {
     res.status(500).json({ error: "Failed to delete vehicle" });
   }
 };
+
 
 module.exports = {
   fetchVehicles,

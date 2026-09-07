@@ -11,7 +11,9 @@ export const PERMISSION_ROUTES = {
     hodManagement: ["/hods"],
     maintenanceManagement: ["/issues"],
     busChangeManagement: ["/bus-change"],
+    auditLogManagement: ["/audit-logs"],
 };
+
 
 // Routes every logged-in admin can see regardless of permissions.
 export const ALWAYS_VISIBLE_ROUTES = ["/dashboard", "/settings"];

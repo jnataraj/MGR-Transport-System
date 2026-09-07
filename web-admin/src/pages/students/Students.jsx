@@ -30,31 +30,65 @@ const Students = () => {
   const [showStudentModalPassword, setShowStudentModalPassword] = useState(false);
 
   // Transport details modal form states
-  const [selectedVehicleId, setSelectedVehicleId] = useState("");
+  const [selectedVehicleIds, setSelectedVehicleIds] = useState([]);
   const [pickupPoint, setPickupPoint] = useState("");
 
   const mapUserToRow = (user, extras = {}) => {
     const rawImage = user.image || null;
     const image = user.image || `https://i.pravatar.cc/150?u=${user.id}`;
-    const assignedVehicle =
-      (user.vehicles && user.vehicles[0]) ||
-      (user.studentAssignments && user.studentAssignments[0]?.vehicle) ||
-      null;
+
+    // Collect all assigned vehicles from studentAssignments or vehicles array
+    let assignedVehicles = [];
+
+    if (Array.isArray(user.studentAssignments) && user.studentAssignments.length > 0) {
+      assignedVehicles = user.studentAssignments
+        .map((a) => {
+          const v = a.vehicle || {};
+          return {
+            id: a.vehicleId || v.id || "",
+            number: v.number || a.vehicleNumber || "",
+            route: v.route || a.route || "",
+            pickupPoint: a.pickupPoint || user.pickupPoint || user.location || "",
+          };
+        })
+        .filter((v) => v.number && v.number !== "Not Assigned" && v.number !== "");
+    }
+
+    if (assignedVehicles.length === 0 && Array.isArray(user.vehicles) && user.vehicles.length > 0) {
+      assignedVehicles = user.vehicles
+        .map((v) => ({
+          id: v.id || "",
+          number: v.number || "",
+          route: v.route || "",
+          pickupPoint: user.pickupPoint || user.location || "",
+        }))
+        .filter((v) => v.number && v.number !== "Not Assigned" && v.number !== "");
+    }
+
+    // Deduplicate by id or number
+    const seen = new Set();
+    assignedVehicles = assignedVehicles.filter((v) => {
+      const key = v.id || v.number;
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    const primaryVehicle = assignedVehicles[0] || null;
     const vehicleNumber =
-      user.vehicleNumber ||
-      assignedVehicle?.number ||
-      (user.vehicle && user.vehicle !== "Not Assigned" ? user.vehicle : null);
-    const vehicleId =
-      user.vehicleId ||
-      assignedVehicle?.id ||
-      (user.studentAssignments && user.studentAssignments[0]?.vehicleId) ||
-      null;
+      assignedVehicles.length > 0
+        ? assignedVehicles.map((v) => v.number).join(", ")
+        : (user.vehicle && user.vehicle !== "Not Assigned" ? user.vehicle : (user.vehicleNumber || "Not Assigned"));
+
+    const vehicleId = primaryVehicle?.id || user.vehicleId || null;
+    const vehicleIds = assignedVehicles.map((v) => v.id).filter(Boolean);
     const route =
-      user.route ||
-      assignedVehicle?.route ||
-      (user.studentAssignments && user.studentAssignments[0]?.vehicle?.route) ||
-      null;
+      assignedVehicles.length > 0
+        ? assignedVehicles.map((v) => v.route).filter(Boolean).join(", ") || "Not Assigned"
+        : (user.route || "Not Assigned");
+
     const studentPickupPoint =
+      primaryVehicle?.pickupPoint ||
       user.pickupPoint ||
       (user.studentAssignments && user.studentAssignments[0]?.pickupPoint) ||
       user.location ||
@@ -69,9 +103,11 @@ const Students = () => {
       rawImage,
       bus: vehicleNumber || "Not Assigned",
       vehicleId: vehicleId,
+      vehicleIds: vehicleIds,
       vehicleNumber: vehicleNumber || "Not Assigned",
       route: route || "Not Assigned",
       pickupPoint: studentPickupPoint,
+      assignedVehicles: assignedVehicles,
       payment: user.paymentStatus || "Pending",
       isOnline: !!user.isOnline,
       lastSeenAt: user.lastSeenAt || null,
@@ -153,16 +189,9 @@ const Students = () => {
       .replace(/^./, (str) => str.toUpperCase());
   };
 
-  // Find currently selected vehicle in modal
-  const selectedVehicle =
-    vehicles.find(
-      (v) => v.id === selectedVehicleId || (v.number && v.number === selectedVehicleId)
-    ) || null;
-
   const handleSave = async (e) => {
     e.preventDefault();
     const formData = new FormData(e.target);
-    const busSelection = selectedVehicleId || "Not Assigned";
     const pickupLocation = formData.get("pickupPoint") || pickupPoint || "";
 
     if (editStudent) {
@@ -177,12 +206,11 @@ const Students = () => {
           homeAddress: formData.get("address"),
           location: pickupLocation || undefined,
           pickupPoint: pickupLocation || undefined,
-          vehicleIds: selectedVehicleId ? [selectedVehicleId] : [],
+          vehicleIds: selectedVehicleIds,
           image: imagePreview || undefined,
         };
 
         await updateUser(editStudent.id, payload);
-        await assignStudentBus(editStudent.id, busSelection, pickupLocation);
 
         const [freshStudents] = await Promise.all([
           fetchUsers("student"),
@@ -221,12 +249,11 @@ const Students = () => {
           homeAddress: formData.get("address"),
           location: pickupLocation || undefined,
           pickupPoint: pickupLocation || undefined,
-          vehicleIds: selectedVehicleId ? [selectedVehicleId] : [],
+          vehicleIds: selectedVehicleIds,
           image: imagePreview || undefined,
         };
 
         const createdStudent = await createUser(payload);
-        await assignStudentBus(createdStudent.id, busSelection, pickupLocation);
 
         const [freshStudents] = await Promise.all([
           fetchUsers("student"),
@@ -254,13 +281,13 @@ const Students = () => {
 
     setShowAddModal(false);
     setEditStudent(null);
-    setSelectedVehicleId("");
+    setSelectedVehicleIds([]);
     setPickupPoint("");
   };
 
   const openAddModal = () => {
     setEditStudent(null);
-    setSelectedVehicleId("");
+    setSelectedVehicleIds([]);
     setPickupPoint("");
     setImagePreview("");
     setImageError("");
@@ -269,10 +296,15 @@ const Students = () => {
 
   const openEditModal = (user) => {
     setEditStudent(user);
-    // Locate vehicle ID from existing vehicles list or user record
-    const matchingVehicle =
-      vehicles.find((v) => v.id === user.vehicleId || v.number === user.bus) || null;
-    setSelectedVehicleId(matchingVehicle ? matchingVehicle.id : (user.vehicleId || ""));
+    const initialVehicleIds =
+      user.assignedVehicles && user.assignedVehicles.length > 0
+        ? user.assignedVehicles.map((v) => v.id).filter(Boolean)
+        : user.vehicleIds && user.vehicleIds.length > 0
+        ? user.vehicleIds
+        : user.vehicleId
+        ? [user.vehicleId]
+        : [];
+    setSelectedVehicleIds(initialVehicleIds);
     setPickupPoint(user.pickupPoint || "");
     const existingImage = user.rawImage || user.details?.image || "";
     setImagePreview(existingImage);
@@ -482,96 +514,125 @@ const Students = () => {
                       <BusFront size={18} color="#9333EA" /> Transport Details
                     </h3>
 
-                    <div className="student-form-row">
-                      <div className="student-field">
-                        <label>Bus / Vehicle</label>
-                        <select
-                          name="bus"
-                          value={selectedVehicleId}
-                          onChange={(e) => setSelectedVehicleId(e.target.value)}
-                        >
-                          <option value="">Not Assigned (No Transport)</option>
-                          {vehicles.map((v) => {
-                            const isMaintenance =
-                              v.status && v.status.toLowerCase() === "maintenance";
-                            const isInactive =
-                              v.status && v.status.toLowerCase() === "inactive";
-                            const studentCount =
-                              v.assignedStudents?.length || v.studentIds?.length || 0;
-                            const capacityText = v.capacity
-                              ? ` • ${studentCount}/${v.capacity} Seats`
-                              : "";
-                            const statusText = isMaintenance
-                              ? " [Maintenance]"
-                              : isInactive
-                              ? " [Inactive]"
-                              : "";
-                            const routeText = v.route
-                              ? ` • Route: ${v.route}`
-                              : " • No Route";
-
+                    <div className="student-field">
+                      <label>Assigned Bus / Vehicle(s)</label>
+                      {selectedVehicleIds.length > 0 && (
+                        <div className="student-selected-vehicles-list">
+                          {selectedVehicleIds.map((vId) => {
+                            const v = vehicles.find((item) => item.id === vId || item.number === vId);
+                            const label = v
+                              ? `${v.number}${v.route ? ` (Route: ${v.route})` : ""}`
+                              : `Vehicle: ${vId.slice(0, 8)}…`;
                             return (
-                              <option key={v.id} value={v.id}>
-                                {v.number || v.name || "Unknown"} (
-                                {v.model || v.type || "Bus"}
-                                {capacityText}
-                                {statusText}
-                                {routeText})
-                              </option>
+                              <span key={vId} className="student-vehicle-badge">
+                                <span>{label}</span>
+                                <button
+                                  type="button"
+                                  className="student-vehicle-badge-remove"
+                                  onClick={() =>
+                                    setSelectedVehicleIds((prev) =>
+                                      prev.filter((id) => id !== vId)
+                                    )
+                                  }
+                                  title="Remove vehicle assignment"
+                                >
+                                  ×
+                                </button>
+                              </span>
                             );
                           })}
-                        </select>
-                        {selectedVehicle && (
-                          <div className="student-field-hint">
-                            Vehicle ID: {selectedVehicle.id.substring(0, 8)}… •{" "}
-                            {selectedVehicle.model || selectedVehicle.type || "Bus"}
-                            {selectedVehicle.capacity
-                              ? ` • Capacity: ${selectedVehicle.capacity} seats`
-                              : ""}
-                          </div>
-                        )}
-                      </div>
+                        </div>
+                      )}
 
+                      <select
+                        value=""
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (!val) return;
+                          if (!selectedVehicleIds.includes(val)) {
+                            setSelectedVehicleIds((prev) => [...prev, val]);
+                          }
+                        }}
+                      >
+                        <option value="">
+                          {selectedVehicleIds.length === 0
+                            ? "Select Bus / Vehicle (or leave unassigned)"
+                            : "+ Add another vehicle assignment…"}
+                        </option>
+                        {vehicles.map((v) => {
+                          const isSelected = selectedVehicleIds.includes(v.id);
+                          const isMaintenance =
+                            v.status && v.status.toLowerCase() === "maintenance";
+                          const isInactive =
+                            v.status && v.status.toLowerCase() === "inactive";
+                          const studentCount =
+                            v.assignedStudents?.length || v.studentIds?.length || 0;
+                          const capacityText = v.capacity
+                            ? ` • ${studentCount}/${v.capacity} Seats`
+                            : "";
+                          const statusText = isMaintenance
+                            ? " [Maintenance]"
+                            : isInactive
+                            ? " [Inactive]"
+                            : "";
+                          const routeText = v.route
+                            ? ` • Route: ${v.route}`
+                            : " • No Route";
+
+                          return (
+                            <option key={v.id} value={v.id} disabled={isSelected}>
+                              {isSelected ? "✓ Assigned: " : ""}{v.number || v.name || "Unknown"} (
+                              {v.model || v.type || "Bus"}
+                              {capacityText}
+                              {statusText}
+                              {routeText})
+                            </option>
+                          );
+                        })}
+                      </select>
+                      {selectedVehicleIds.length > 0 && (
+                        <div style={{ marginTop: 6, display: "flex", justifyContent: "flex-end" }}>
+                          <button
+                            type="button"
+                            className="student-clear-vehicles-btn"
+                            onClick={() => setSelectedVehicleIds([])}
+                          >
+                            Clear all vehicle assignments
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="student-form-row">
                       <div className="student-field">
-                        <label>Route</label>
+                        <label>Assigned Route(s)</label>
                         <input
                           type="text"
                           name="route"
                           value={
-                            selectedVehicleId
-                              ? selectedVehicle?.route || "No Route Assigned"
+                            selectedVehicleIds.length > 0
+                              ? vehicles
+                                  .filter((v) => selectedVehicleIds.includes(v.id))
+                                  .map((v) => v.route || "No Route")
+                                  .filter(Boolean)
+                                  .join(", ") || "No Route Assigned"
                               : "Not Assigned"
                           }
                           readOnly
                           className="student-field-readonly"
-                          placeholder="Auto-assigned from vehicle"
+                          placeholder="Auto-assigned from vehicle(s)"
                         />
-                        {selectedVehicleId && !selectedVehicle?.route && (
-                          <div className="student-field-warning">
-                            <AlertTriangle size={14} />
-                            No route assigned to this vehicle in Vehicle Management
-                          </div>
-                        )}
-                        {selectedVehicle &&
-                          (selectedVehicle.status?.toLowerCase() === "maintenance" ||
-                            selectedVehicle.status?.toLowerCase() === "inactive") && (
-                            <div className="student-field-warning">
-                              <AlertTriangle size={14} />
-                              Vehicle status is currently {selectedVehicle.status}
-                            </div>
-                          )}
                       </div>
-                    </div>
-
-                    <div className="student-field">
-                      <label>Pickup Point (Optional)</label>
-                      <input
-                        name="pickupPoint"
-                        type="text"
-                        placeholder="e.g. Guindy Bus Stand / Main Gate"
-                        value={pickupPoint}
-                        onChange={(e) => setPickupPoint(e.target.value)}
-                      />
+                      <div className="student-field">
+                        <label>Pickup Point (Optional)</label>
+                        <input
+                          name="pickupPoint"
+                          type="text"
+                          placeholder="e.g. Guindy Bus Stand / Main Gate"
+                          value={pickupPoint}
+                          onChange={(e) => setPickupPoint(e.target.value)}
+                        />
+                      </div>
                     </div>
                   </div>
 
@@ -630,7 +691,7 @@ const Students = () => {
                     onClick={() => {
                       setShowAddModal(false);
                       setEditStudent(null);
-                      setSelectedVehicleId("");
+                      setSelectedVehicleIds([]);
                       setPickupPoint("");
                     }}
                   >
@@ -687,11 +748,21 @@ const Students = () => {
                           </td>
                           <td>{user.dept}</td>
                           <td className="student-bus-cell">
-                            <div style={{ fontWeight: 600 }}>{user.bus}</div>
-                            {user.route && user.route !== "Not Assigned" && (
-                              <div style={{ fontSize: "0.8rem", color: "#6b7280" }}>
-                                Route: {user.route}
+                            {user.assignedVehicles && user.assignedVehicles.length > 0 ? (
+                              <div className="student-bus-list">
+                                {user.assignedVehicles.map((veh, idx) => (
+                                  <div key={veh.id || idx} className="student-bus-item">
+                                    <div className="student-bus-number">{veh.number}</div>
+                                    {veh.route && veh.route !== "Not Assigned" && (
+                                      <div className="student-bus-route">
+                                        Route: {veh.route}
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
                               </div>
+                            ) : (
+                              <div className="student-bus-unassigned">Not Assigned</div>
                             )}
                           </td>
                           <td>
@@ -784,9 +855,23 @@ const Students = () => {
                   </div>
                   <strong>Bus / Vehicle:</strong>
                   <span>
-                    {selectedStudent.bus ||
-                      selectedStudent.vehicleNumber ||
-                      "Not Assigned"}
+                    {selectedStudent.assignedVehicles && selectedStudent.assignedVehicles.length > 0 ? (
+                      <div className="student-detail-bus-list">
+                        {selectedStudent.assignedVehicles.map((veh, idx) => (
+                          <div key={veh.id || idx} className="student-detail-bus-item">
+                            <span className="student-detail-bus-number">{veh.number}</span>
+                            {veh.route && veh.route !== "Not Assigned" && (
+                              <span className="student-detail-bus-route"> • Route: {veh.route}</span>
+                            )}
+                            {veh.pickupPoint && (
+                              <span className="student-detail-bus-stop"> (📍 Stop: {veh.pickupPoint})</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      selectedStudent.bus || selectedStudent.vehicleNumber || "Not Assigned"
+                    )}
                   </span>
                   <strong>Route:</strong>
                   <span>{selectedStudent.route || "Not Assigned"}</span>
