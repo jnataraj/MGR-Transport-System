@@ -716,7 +716,7 @@ const Dashboard = () => {
       },
       {
         key: "missing",
-        label: `Student Missing (${dedupedMissingAlerts.length})`,
+        label: `Student Out of Range (${dedupedMissingAlerts.length})`,
         color: "#DC2626",
         badge: activeMissingCount > 0 ? `${activeMissingCount} ACTIVE` : null,
       },
@@ -843,7 +843,7 @@ const Dashboard = () => {
               className="db-section-heading db-section-heading--sm"
               style={{ color: "#DC2626", display: "flex", alignItems: "center", justifyContent: "space-between" }}
             >
-              <span>🚨 Student Missing Alerts (Student &gt; {alertBreak?.missingDistanceThreshold ?? 10}m from Assigned Bus)</span>
+              <span>🚨 Student Out of Range Alerts (Student &gt; {alertBreak?.missingDistanceThreshold ?? 10}m from Assigned Bus)</span>
               {activeMissingCount > 0 && (
                 <span className="db-pill db-pill--pulse-red">
                   {activeMissingCount} ACTIVE
@@ -901,13 +901,12 @@ const Dashboard = () => {
                         <div className="db-missing-grid-item">
                           <span className="db-missing-k">Student Movement:</span>
                           <span
-                            className={`db-missing-v ${
-                              m.studentMovementStatus === "MOVING"
+                            className={`db-missing-v ${m.studentMovementStatus === "MOVING"
                                 ? "db-missing-distance-alert"
                                 : m.studentMovementStatus === "STALE"
                                   ? "db-missing-stale"
                                   : ""
-                            }`}
+                              }`}
                           >
                             {m.studentMovementStatus === "MOVING" && "🏃 MOVING"}
                             {m.studentMovementStatus === "STATIONARY" && "🧍 STATIONARY"}
@@ -1766,12 +1765,12 @@ const Dashboard = () => {
                 <span className="db-missing-pulse-icon">🚨</span>
                 <div>
                   <div className="db-missing-emergency-title">
-                    CRITICAL: {missingAlerts.filter((m) => m.status === "ACTIVE").length} Student Missing Alert(s) Active!
+                    CRITICAL: {missingAlerts.filter((m) => m.status === "ACTIVE").length} Student Out of Range Alert(s) Active!
                   </div>
                   <div className="db-missing-emergency-sub">
                     {missingAlerts
                       .filter((m) => m.status === "ACTIVE")
-                       .map((m) => `${m.studentName} — ${(m.studentBusDistance ?? m.distanceMeters)}m from Bus ${m.vehicleNumber} (proximity alert)`)
+                      .map((m) => `${m.studentName} — ${(m.studentBusDistance ?? m.distanceMeters)}m from Bus ${m.vehicleNumber} (proximity alert)`)
                       .join("  •  ")}
                   </div>
                 </div>

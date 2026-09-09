@@ -37,7 +37,7 @@ export default function useDashboardSocket({ user, role }) {
       let parsedData = {};
       try {
         parsedData = typeof notification.data === "string" ? JSON.parse(notification.data || "{}") : (notification.data || {});
-      } catch {}
+      } catch { }
       const missingId = parsedData.missingAlertId || parsedData.alertId || parsedData.id;
       const notifStudentId = parsedData.studentId;
 
@@ -92,7 +92,7 @@ export default function useDashboardSocket({ user, role }) {
             id: alertIncidentId || Date.now().toString(),
             missingAlertId: alertIncidentId,
             alertId: alertIncidentId,
-            title: "🚨 Student Missing Alert",
+            title: "🚨 Student Out of Range Alert",
             message: alertMsg,
             notificationType: "missing_alert",
             studentId: alert.studentId,
@@ -110,7 +110,7 @@ export default function useDashboardSocket({ user, role }) {
             return updated;
           }
 
-          Alert.alert("🚨 Student Missing Alert", alertMsg, [{ text: "OK" }]);
+          Alert.alert("🚨 Student Out of Range Alert", alertMsg, [{ text: "OK" }]);
           setUnreadAlerts((count) => count + 1);
           return [updatedCard, ...previous];
         });
@@ -147,7 +147,7 @@ export default function useDashboardSocket({ user, role }) {
               studentId: res.studentId,
               studentName: res.studentName,
               notificationType: "missing_alert_resolved",
-              title: "✅ Student Missing Alert Resolved",
+              title: "✅ Student Out of Range Alert Resolved",
               message: `✅ ${res.studentName || "Student"} — Resolved (${res.resolvedReason || "Closed"}).`,
               status: "RESOLVED",
               resolvedReason: res.resolvedReason,

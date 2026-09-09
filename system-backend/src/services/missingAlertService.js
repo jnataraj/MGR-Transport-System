@@ -305,7 +305,7 @@ const resolveMissingAlertRecipients = async (studentTransit) => {
 
   // Backend logs formatted as requested
   console.log("-----------------------------------------------------------------");
-  console.log("[Student Missing Alert]");
+  console.log("[Student Out of Range Alert]");
   console.log(`Student ID: ${studentTransit?.studentId || "N/A"}`);
   console.log(`Student Name: ${studentTransit?.studentName || "N/A"}`);
   console.log(`Department: ${studentDepartment || "N/A"}`);
@@ -351,7 +351,7 @@ const dispatchMissingAlertNotifications = async (io, alertPayload, studentTransi
     assignedHods,
   } = await resolveMissingAlertRecipients(studentTransit);
 
-  const title = "🚨 Student Missing Alert";
+  const title = "🚨 Student Out of Range Alert";
   // distanceMeters passed in = STUDENT-TO-BUS distance (NOT student movement)
   const studentBusDistStr = (Math.round(distanceMeters * 10) / 10).toFixed(1);
   const movementStatus = studentTransit.studentMovementStatus || "UNKNOWN";
@@ -626,7 +626,7 @@ const dispatchMissingAlertNotifications = async (io, alertPayload, studentTransi
         } else {
           const hodNotif = await prisma.notification.create({
             data: {
-              title: `🚨 Student Missing Alert - ${studentDepartment || "Department"}`,
+              title: `🚨 Student Out of Range Alert - ${studentDepartment || "Department"}`,
               message: hodMessage,
               type: "missing_alert",
               sender: "System",
@@ -641,7 +641,7 @@ const dispatchMissingAlertNotifications = async (io, alertPayload, studentTransi
           }
 
           if (hod.pushToken) {
-            await sendPushNotification([hod.pushToken], `🚨 Student Missing Alert - ${studentDepartment || "Department"}`, hodMessage, commonData);
+            await sendPushNotification([hod.pushToken], `🚨 Student Out of Range Alert - ${studentDepartment || "Department"}`, hodMessage, commonData);
           }
         }
       } catch (err) {
@@ -918,7 +918,7 @@ const evaluateProximity = async (studentId, io) => {
       console.error("[missingAlertService] DB Alert write error:", dbErr.message);
     }
 
-    const driverAlertTitle = "🚨 Student Missing Alert";
+    const driverAlertTitle = "🚨 Student Out of Range Alert";
     // distanceMeters here is STUDENT-TO-BUS distance, NOT student movement distance.
     const studentBusDistanceFormatted = (Math.round(distanceMeters * 10) / 10).toFixed(1);
     const driverAlertMessage =
@@ -1265,7 +1265,7 @@ const closeAlertById = async (alertId, reason, io) => {
         },
       });
 
-      const resTitle = "✅ Student Missing Alert Resolved";
+      const resTitle = "✅ Student Out of Range Alert Resolved";
       const resMessage = `Student ${resolved.studentName} has rejoined the vehicle / resolved (${reason}).`;
 
       // 2a. Resolution notification for Web Admin (Strictly 1 per missingAlertId)
@@ -1458,7 +1458,7 @@ const closeAlertById = async (alertId, reason, io) => {
           if (!existingHodNotif) {
             const hodNotif = await prisma.notification.create({
               data: {
-                title: `✅ Student Missing Alert Resolved - ${studentUser.department}`,
+                title: `✅ Student Out of Range Alert Resolved - ${studentUser.department}`,
                 message: `Student ${resolved.studentName} (${studentUser.rollNumber || "N/A"}) from ${studentUser.department} has rejoined the vehicle / journey resolved (${reason}).`,
                 type: "missing_alert_resolved",
                 sender: "System",
@@ -1473,7 +1473,7 @@ const closeAlertById = async (alertId, reason, io) => {
             }
 
             if (hod.pushToken) {
-              await sendPushNotification([hod.pushToken], `✅ Student Missing Alert Resolved - ${studentUser.department}`, `Student ${resolved.studentName} from ${studentUser.department} has rejoined the vehicle / journey resolved (${reason}).`, payload);
+              await sendPushNotification([hod.pushToken], `✅ Student Out of Range Alert Resolved - ${studentUser.department}`, `Student ${resolved.studentName} from ${studentUser.department} has rejoined the vehicle / journey resolved (${reason}).`, payload);
             }
           }
         }
@@ -1595,7 +1595,7 @@ const cleanupDuplicateActiveAlerts = async () => {
       let parsed = {};
       try {
         parsed = typeof notif.data === "string" ? JSON.parse(notif.data || "{}") : (notif.data || {});
-      } catch {}
+      } catch { }
       const missingKey = parsed.missingAlertId || parsed.alertId || parsed.id || null;
       const targetKey = notif.userId || notif.target || "admin";
       if (missingKey) {

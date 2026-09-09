@@ -953,7 +953,7 @@ source: StudentApp-handleScanQR`);
 
             const updatedCard = {
               id: alert.id || Date.now().toString(),
-              title: "🚨 Student Missing Alert",
+              title: "🚨 Student Out of Range Alert",
               message: alertMsg,
               notificationType: "missing_alert",
               studentId: alert.studentId,
@@ -972,7 +972,7 @@ source: StudentApp-handleScanQR`);
               return updated;
             }
 
-            Alert.alert("🚨 Student Missing Alert", alertMsg, [{ text: "OK" }]);
+            Alert.alert("🚨 Student Out of Range Alert", alertMsg, [{ text: "OK" }]);
             setUnreadAlerts((c) => c + 1);
             return [updatedCard, ...prev];
           });
@@ -1304,9 +1304,11 @@ source: StudentApp-handleScanQR`);
                       const active = hodYearFilter === tab.key;
                       return (
                         <TouchableOpacity key={tab.key} onPress={() => setHodYearFilter(tab.key)}
-                          style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20,
+                          style={{
+                            paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20,
                             backgroundColor: active ? "#7C3AED" : "#F1F5F9",
-                            borderWidth: 1, borderColor: active ? "#7C3AED" : "#E2E8F0" }}>
+                            borderWidth: 1, borderColor: active ? "#7C3AED" : "#E2E8F0"
+                          }}>
                           <Text style={{ fontSize: 9, fontWeight: "900", color: active ? "#FFF" : "#64748B" }}>
                             {tab.label}
                           </Text>

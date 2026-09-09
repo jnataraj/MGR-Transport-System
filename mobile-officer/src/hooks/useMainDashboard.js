@@ -350,7 +350,7 @@ export function useMainDashboard({ user, token, onLogout }) {
             id: m.id,
             missingAlertId: m.id,
             notificationType: m.status === "RESOLVED" ? "missing_alert_resolved" : "missing_alert",
-            routeName: m.status === "RESOLVED" ? "✅ Student Missing Alert Resolved" : "🚨 Student Missing Alert",
+            routeName: m.status === "RESOLVED" ? "✅ Student Out of Range Alert Resolved" : "🚨 Student Out of Range Alert",
             customMessage: m.status === "RESOLVED" ? `Student ${m.studentName} resolved (${m.resolvedReason || "Rejoined"}).` : `Student ${m.studentName} is ${m.distanceMeters || "10+"}m away.`,
             effectiveDate: m.alertTime ? new Date(m.alertTime).toISOString().split("T")[0] : "",
             effectiveTime: m.alertTime ? new Date(m.alertTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "",
@@ -514,8 +514,8 @@ export function useMainDashboard({ user, token, onLogout }) {
           id: alertIncidentId,
           missingAlertId: alertIncidentId,
           alertId: alertIncidentId,
-          title: "🚨 Student Missing Alert",
-          routeName: "🚨 Student Missing Alert",
+          title: "🚨 Student Out of Range Alert",
+          routeName: "🚨 Student Out of Range Alert",
           message: alertMsg,
           customMessage: alertMsg,
           notificationType: "missing_alert",
@@ -544,7 +544,7 @@ export function useMainDashboard({ user, token, onLogout }) {
             return updated;
           }
 
-          Alert.alert("🚨 Student Missing Alert", alertMsg, [{ text: "OK" }]);
+          Alert.alert("🚨 Student Out of Range Alert", alertMsg, [{ text: "OK" }]);
           setUnreadAlerts((c) => c + 1);
           return [updatedCard, ...prev];
         });
@@ -561,7 +561,7 @@ export function useMainDashboard({ user, token, onLogout }) {
       });
 
       socketRef.current.on("student_missing_alert_resolved", (res) => {
-        const resolvedTitle = "✅ Student Missing Alert Resolved";
+        const resolvedTitle = "✅ Student Out of Range Alert Resolved";
         const resolvedMsg = `Student ${res.studentName || "Student"} has rejoined the vehicle / resolved (${res.resolvedReason || "Closed"}).`;
         const alertIncidentId = res.id || res.missingAlertId || res.alertId;
 

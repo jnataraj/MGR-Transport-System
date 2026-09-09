@@ -176,7 +176,7 @@ exports.getUserNotifications = async (req, res) => {
         let parsed = {};
         try {
           parsed = typeof notif.data === "string" ? JSON.parse(notif.data || "{}") : (notif.data || {});
-        } catch {}
+        } catch { }
         const incidentId = parsed.missingAlertId || parsed.alertId || parsed.id || (parsed.studentId ? `student_${parsed.studentId}` : null);
         if (incidentId) {
           const key = `missing_${incidentId}`;
@@ -390,7 +390,7 @@ exports.resolveMissingAlert = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Missing alert resolved successfully",
+      message: "Out of Range alert resolved successfully",
       alert: resolved,
     });
   } catch (error) {

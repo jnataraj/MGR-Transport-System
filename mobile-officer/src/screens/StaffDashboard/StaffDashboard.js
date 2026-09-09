@@ -1484,7 +1484,7 @@ export default function StaffDashboard({ dashboard }) {
                   const typeMap = {
                     missing_alert: {
                       icon: TriangleAlert,
-                      label: "Student Missing Alert",
+                      label: "Student Out of Range Alert",
                       bgColor: "#FEF2F2",
                       leftColor: "#DC2626",
                       tagBg: "#FEE2E2",
@@ -1492,7 +1492,7 @@ export default function StaffDashboard({ dashboard }) {
                     },
                     missing_alert_resolved: {
                       icon: Check,
-                      label: "Missing Alert Resolved",
+                      label: "Student Out of Range Alert Resolved",
                       bgColor: "#F0FDF4",
                       leftColor: "#16A34A",
                       tagBg: "#DCFCE7",
@@ -1720,7 +1720,7 @@ export default function StaffDashboard({ dashboard }) {
                   const typeMap = {
                     missing_alert: {
                       icon: TriangleAlert,
-                      label: "Student Missing Alert",
+                      label: "Student Out of Range Alert",
                       bgColor: "#FEF2F2",
                       leftColor: "#DC2626",
                       tagBg: "#FEE2E2",
@@ -1728,7 +1728,7 @@ export default function StaffDashboard({ dashboard }) {
                     },
                     missing_alert_resolved: {
                       icon: Check,
-                      label: "Missing Alert Resolved",
+                      label: "Student Out of Range Alert Resolved",
                       bgColor: "#F0FDF4",
                       leftColor: "#16A34A",
                       tagBg: "#DCFCE7",

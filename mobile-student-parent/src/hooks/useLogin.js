@@ -40,7 +40,7 @@ export default function useLogin() {
 
   const handleLogin = async () => {
     if (!email.trim() || !password) {
-      Alert.alert("Missing Details", "Please enter both email and password.");
+      Alert.alert("Out of Range Details", "Please enter both email and password.");
       return;
     }
 
