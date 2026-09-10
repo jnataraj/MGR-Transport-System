@@ -200,6 +200,8 @@ export default function StaffDashboard({ dashboard }) {
 
     showProfileModal,
     setShowProfileModal,
+    nextScanType,
+    setNextScanType,
   } = dashboard;
 
   const [alertModalTab, setAlertModalTab] = useState("unread"); // "unread" | "history"
@@ -553,6 +555,7 @@ export default function StaffDashboard({ dashboard }) {
       </View>
 
       {/* Modals */}
+      {/* ── QR Camera Modal ── */}
       <Modal visible={isCameraOpen} animationType="slide">
         <View style={styles.cameraContainer}>
           <CameraView style={styles.camera} ref={cameraRef} facing="back">
@@ -562,6 +565,78 @@ export default function StaffDashboard({ dashboard }) {
                   ? qrStatus === "STARTED" ? "Close Attendance (QR Scan)" : "Initial Scan (Start Work)"
                   : selfieStatus === "VERIFIED" ? "Close/Hault Vehicle Verification" : "Vehicle Verification Selfie (Start)"}
               </Text>
+
+              {/* ── TO COLLEGE / TO HOME direction selector ── */}
+              {cameraMode === "QR" && (
+                <View
+                  style={{
+                    position: "absolute",
+                    top: 100,
+                    flexDirection: "row",
+                    backgroundColor: "rgba(0,0,0,0.45)",
+                    borderRadius: 30,
+                    padding: 4,
+                    zIndex: 20,
+                  }}
+                >
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => setNextScanType("TO_COLLEGE")}
+                    style={[
+                      {
+                        paddingVertical: 9,
+                        paddingHorizontal: 22,
+                        borderRadius: 26,
+                        minWidth: 120,
+                        alignItems: "center",
+                      },
+                      nextScanType === "TO_COLLEGE"
+                        ? { backgroundColor: "#1D4ED8" }
+                        : { backgroundColor: "transparent" },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        { fontSize: 13, fontWeight: "800", letterSpacing: 0.5 },
+                        nextScanType === "TO_COLLEGE"
+                          ? { color: "#FFFFFF" }
+                          : { color: "rgba(255,255,255,0.65)" },
+                      ]}
+                    >
+                      TO COLLEGE
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => setNextScanType("TO_HOME")}
+                    style={[
+                      {
+                        paddingVertical: 9,
+                        paddingHorizontal: 22,
+                        borderRadius: 26,
+                        minWidth: 120,
+                        alignItems: "center",
+                      },
+                      nextScanType === "TO_HOME"
+                        ? { backgroundColor: "#1D4ED8" }
+                        : { backgroundColor: "transparent" },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        { fontSize: 13, fontWeight: "800", letterSpacing: 0.5 },
+                        nextScanType === "TO_HOME"
+                          ? { color: "#FFFFFF" }
+                          : { color: "rgba(255,255,255,0.65)" },
+                      ]}
+                    >
+                      TO HOME
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
               <View style={cameraMode === "QR" ? styles.wrapperQR : styles.wrapperFace} />
               <Text style={styles.cameraHint}>
                 {cameraMode === "QR" ? "Align QR Code" : "Include yourself & vehicle in frame"}

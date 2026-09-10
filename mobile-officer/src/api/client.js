@@ -6,6 +6,7 @@ export const API_BASE = process.env.EXPO_PUBLIC_API_URL;
 const TOKEN_KEY = "ctms_auth_token";
 const USER_KEY = "ctms_auth_user";
 const GPS_KEY = "ctms_gps_enabled";
+const SCAN_TYPE_KEY = "ctms_next_scan_type";
 
 let onUnauthorized = null;
 export const setOnUnauthorized = (handler) => {
@@ -26,6 +27,16 @@ export const storeGpsEnabled = async (enabled) => {
 export const loadGpsEnabled = async () => {
   const raw = await AsyncStorage.getItem(GPS_KEY);
   return raw ? JSON.parse(raw) : false;
+};
+
+// Save / load next scan direction (TO_COLLEGE | TO_HOME)
+export const storeScanType = async (type) => {
+  await AsyncStorage.setItem(SCAN_TYPE_KEY, type);
+};
+
+export const loadScanType = async () => {
+  const raw = await AsyncStorage.getItem(SCAN_TYPE_KEY);
+  return raw || "TO_COLLEGE";
 };
 
 // Clear token and user

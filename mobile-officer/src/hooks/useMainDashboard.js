@@ -7,7 +7,7 @@ import * as ImagePicker from "expo-image-picker";
 import jsQR from "jsqr";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
-import { API_BASE, storeGpsEnabled, loadGpsEnabled } from "../api/client";
+import { API_BASE, storeGpsEnabled, loadGpsEnabled, storeScanType, loadScanType } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { registerForPushNotificationsAsync } from "../services/notificationService";
 import {
@@ -49,6 +49,8 @@ export function useMainDashboard({ user, token, onLogout }) {
   });
   const socketRef = useRef(null);
   const cameraRef = useRef(null);
+  // "TO_COLLEGE" | "TO_HOME" — which direction the NEXT successful scan is for
+  const [nextScanType, setNextScanType] = useState("TO_COLLEGE");
   const [activeTab, setActiveTab] = useState("home");
   const [showProfileModal, setShowProfileModal] = useState(false);
 
@@ -684,6 +686,10 @@ export function useMainDashboard({ user, token, onLogout }) {
         setGpsEnabled(status === "granted");
       }
 
+      // Restore the persisted next-scan direction (TO_COLLEGE / TO_HOME)
+      const savedScanType = await loadScanType();
+      setNextScanType(savedScanType);
+
       try {
         const { status } = await Location.getForegroundPermissionsAsync();
         if (status === "granted") {
@@ -775,6 +781,7 @@ export function useMainDashboard({ user, token, onLogout }) {
           accuracy: acc,
           gpsAccuracy: acc,
           gpsTimestamp: gpsTime,
+          travelType: nextScanType,
         }),
       });
       resData = await response.json().catch(() => ({}));
@@ -802,8 +809,20 @@ export function useMainDashboard({ user, token, onLogout }) {
     setIsScanConfirmOpen(true);
     setQrStatus(nextStatus);
 
-    // Closing the trip should also stop GPS sharing immediately.
+    // ── Advance the direction only after an OFF DUTY (CLOSED) scan ──
+    // State machine:
+    //   TO_COLLEGE + ON_DUTY  → (scan) → TO_COLLEGE + OFF_DUTY
+    //   TO_COLLEGE + OFF_DUTY → (scan) → TO_HOME    + ON_DUTY
+    //   TO_HOME    + ON_DUTY  → (scan) → TO_HOME    + OFF_DUTY
+    //   TO_HOME    + OFF_DUTY → (scan) → TO_COLLEGE + ON_DUTY
+    // Direction switches ONLY when nextStatus === "CLOSED" (OFF DUTY completion).
+    // An ON DUTY scan leaves the direction unchanged.
     if (nextStatus === "CLOSED") {
+      const newScanType = nextScanType === "TO_COLLEGE" ? "TO_HOME" : "TO_COLLEGE";
+      setNextScanType(newScanType);
+      storeScanType(newScanType).catch(() => {});
+
+      // Closing the trip should also stop GPS sharing immediately.
       socketRef.current?.emit("driverLocationStopped", { vehicleId: userVehicle });
     }
   };
@@ -1115,6 +1134,8 @@ export function useMainDashboard({ user, token, onLogout }) {
     setIsCloseTripConfirmOpen,
     handleQRScan,
     pickQRFromLibrary,
+    nextScanType,
+    setNextScanType,
 
     // GPS / trip
     gpsEnabled,
